@@ -21,13 +21,26 @@ sqlite3 $SQLITE_PATH "CREATE TABLE IF NOT EXISTS fixes (
 
 ## WORKFLOW
 
-1. CHECK PODS
+1. CHECK POD STATUS
    ```bash
    kubectl get pods -n $TARGET_NAMESPACE -o wide
    ```
    Look for pods with status: CrashLoopBackOff, Error, ImagePullBackOff, Pending (stuck)
 
-2. IF DEGRADED POD FOUND:
+2. CHECK POD LOGS FOR ERRORS (even if pod status is Running)
+   For EACH pod in the namespace:
+   ```bash
+   kubectl logs <pod-name> -n $TARGET_NAMESPACE --tail=50
+   ```
+   Look for error patterns in logs:
+   - Lines containing [ERROR], ERROR, Error, error
+   - Stack traces, exceptions, panics
+   - Connection refused, timeout errors
+   - Any repeating error patterns
+
+   If errors found in a Running pod, treat it as a degraded pod and proceed to analyze.
+
+3. IF DEGRADED POD FOUND (by status OR by log errors):
    a. Get pod details:
       ```bash
       kubectl describe pod <pod-name> -n $TARGET_NAMESPACE
@@ -42,12 +55,12 @@ sqlite3 $SQLITE_PATH "CREATE TABLE IF NOT EXISTS fixes (
       sqlite3 $SQLITE_PATH "INSERT INTO fixes (timestamp, namespace, pod_name, error_type, error_message, status) VALUES (datetime('now'), '$TARGET_NAMESPACE', '<pod-name>', '<error-type>', '<error-message>', 'analyzing');"
       ```
 
-3. ANALYZE THE ERROR
+4. ANALYZE THE ERROR
    - Is it an application code error? (null pointer, missing file, syntax error)
    - Is it a configuration error? (wrong env var, missing config)
    - Is it a resource error? (OOM, disk full)
 
-4. IF FIXABLE via exec:
+5. IF FIXABLE via exec:
    a. Exec into the pod:
       ```bash
       kubectl exec -it <pod-name> -n $TARGET_NAMESPACE -- /bin/bash
@@ -60,7 +73,7 @@ sqlite3 $SQLITE_PATH "CREATE TABLE IF NOT EXISTS fixes (
       sqlite3 $SQLITE_PATH "UPDATE fixes SET fix_applied='<description of fix>', status='success' WHERE pod_name='<pod-name>' AND status='analyzing';"
       ```
 
-5. IF NOT FIXABLE:
+6. IF NOT FIXABLE:
    ```bash
    sqlite3 $SQLITE_PATH "UPDATE fixes SET fix_applied='Cannot fix: <reason>', status='failed' WHERE pod_name='<pod-name>' AND status='analyzing';"
    ```
