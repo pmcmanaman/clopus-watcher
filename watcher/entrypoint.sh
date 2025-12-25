@@ -51,12 +51,11 @@ sqlite3 "$SQLITE_PATH" "CREATE TABLE IF NOT EXISTS fixes (
 echo "Database initialized"
 
 # === LOAD PROMPT ===
-if [ -f /config/master-prompt.md ]; then
-    PROMPT=$(cat /config/master-prompt.md)
-elif [ -f /app/master-prompt.md ]; then
+# Master prompt is baked into the image at /app/master-prompt.md
+if [ -f /app/master-prompt.md ]; then
     PROMPT=$(cat /app/master-prompt.md)
 else
-    echo "ERROR: No master prompt found"
+    echo "ERROR: No master prompt found at /app/master-prompt.md"
     exit 1
 fi
 

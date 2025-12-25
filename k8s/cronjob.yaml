@@ -42,8 +42,6 @@ spec:
               volumeMounts:
                 - name: data
                   mountPath: /data
-                - name: config
-                  mountPath: /config
                 # Uncomment for AUTH_MODE=credentials
                 # - name: claude-credentials
                 #   mountPath: /secrets
@@ -59,9 +57,6 @@ spec:
             - name: data
               persistentVolumeClaim:
                 claimName: watcher-data
-            - name: config
-              configMap:
-                name: watcher-config
             # Uncomment for AUTH_MODE=credentials
             # - name: claude-credentials
             #   secret:

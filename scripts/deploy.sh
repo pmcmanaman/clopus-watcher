@@ -16,9 +16,6 @@ kubectl apply -f "$K8S_DIR/rbac.yaml"
 echo "Creating secrets..."
 kubectl apply -f "$K8S_DIR/sealed-secret.yaml"
 
-echo "Creating config..."
-kubectl apply -f "$K8S_DIR/configmap.yaml"
-
 echo "Creating persistent volume..."
 kubectl apply -f "$K8S_DIR/pvc.yaml"
 
