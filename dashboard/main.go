@@ -29,16 +29,18 @@ func main() {
 	}
 	defer database.Close()
 
-	// Parse templates
+	// Parse templates - must parse all together so they can reference each other
 	tmpl, err := template.ParseGlob("templates/*.html")
 	if err != nil {
 		log.Fatalf("Failed to parse templates: %v", err)
 	}
 
-	partials, err := template.ParseGlob("templates/partials/*.html")
+	tmpl, err = tmpl.ParseGlob("templates/partials/*.html")
 	if err != nil {
 		log.Fatalf("Failed to parse partials: %v", err)
 	}
+
+	partials := tmpl
 
 	// Create handler
 	h := handlers.New(database, tmpl, partials)
