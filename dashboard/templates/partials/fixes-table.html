@@ -1,58 +1,44 @@
 {{define "fixes-table.html"}}
-<table class="w-full">
-    <thead>
-        <tr class="border-b border-neutral-200 bg-neutral-50">
-            <th class="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-neutral-500">Time</th>
-            <th class="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-neutral-500">Pod</th>
-            <th class="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-neutral-500">Error</th>
-            <th class="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-neutral-500">Resolution</th>
-            <th class="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-neutral-500">Status</th>
-        </tr>
-    </thead>
-    <tbody class="divide-y divide-neutral-100">
-        {{if .Fixes}}
-        {{range .Fixes}}
-        <tr class="hover:bg-neutral-50 transition-colors">
-            <td class="py-4 px-4 text-sm text-neutral-500 font-mono">{{.Timestamp}}</td>
-            <td class="py-4 px-4">
-                <div class="text-sm font-medium text-neutral-900">{{.PodName}}</div>
-                <div class="text-xs text-neutral-400">{{.Namespace}}</div>
-            </td>
-            <td class="py-4 px-4">
-                <div class="text-sm font-medium text-neutral-900">{{.ErrorType}}</div>
-                {{if .ErrorMessage}}
-                <div class="text-xs text-neutral-400 truncate max-w-xs" title="{{.ErrorMessage}}">{{.ErrorMessage}}</div>
+{{if .Fixes}}
+<div class="divide-y divide-neutral-800">
+    {{range .Fixes}}
+    <div class="px-4 py-3 hover:bg-neutral-800/50 transition-colors">
+        <div class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="font-medium text-sm text-white truncate">{{.PodName}}</span>
+                    {{if eq .Status "success"}}
+                    <span class="flex-shrink-0 w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                    {{else if eq .Status "failed"}}
+                    <span class="flex-shrink-0 w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                    {{else}}
+                    <span class="flex-shrink-0 w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+                    {{end}}
+                </div>
+                <div class="text-xs text-neutral-500 mb-2">{{.Namespace}} &middot; {{.Timestamp}}</div>
+                <div class="text-xs">
+                    <span class="text-red-400">{{.ErrorType}}</span>
+                    {{if .ErrorMessage}}
+                    <span class="text-neutral-600 truncate block" title="{{.ErrorMessage}}">{{.ErrorMessage}}</span>
+                    {{end}}
+                </div>
+                {{if .FixApplied}}
+                <div class="mt-2 text-xs text-neutral-400 truncate" title="{{.FixApplied}}">
+                    <span class="text-emerald-500">→</span> {{.FixApplied}}
+                </div>
                 {{end}}
-            </td>
-            <td class="py-4 px-4 text-sm text-neutral-600 max-w-xs truncate" title="{{.FixApplied}}">{{.FixApplied}}</td>
-            <td class="py-4 px-4">
-                {{if eq .Status "success"}}
-                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                    Fixed
-                </span>
-                {{else if eq .Status "failed"}}
-                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 text-red-700 text-xs font-medium">
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-                    Failed
-                </span>
-                {{else}}
-                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">
-                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    Analyzing
-                </span>
-                {{end}}
-            </td>
-        </tr>
-        {{end}}
-        {{else}}
-        <tr>
-            <td colspan="5" class="py-12 text-center">
-                <div class="text-neutral-400 text-sm">No fixes recorded yet</div>
-                <div class="text-neutral-300 text-xs mt-1">Watcher runs every 5 minutes</div>
-            </td>
-        </tr>
-        {{end}}
-    </tbody>
-</table>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="flex flex-col items-center justify-center h-full text-center py-12">
+    <svg class="w-12 h-12 text-neutral-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div class="text-neutral-500 text-sm">No fixes yet</div>
+    <div class="text-neutral-600 text-xs mt-1">Watching every 5 minutes</div>
+</div>
+{{end}}
 {{end}}
