@@ -43,15 +43,19 @@ validate_config() {
     fi
 
     # Validate kubectl can connect to cluster (only if kubectl exists)
+    # Note: We use 'kubectl get --raw /healthz' instead of 'cluster-info' because
+    # cluster-info requires listing services in kube-system which the watcher doesn't need
     if command -v kubectl >/dev/null 2>&1; then
-        if ! kubectl cluster-info >/dev/null 2>&1; then
+        if ! kubectl get --raw /healthz >/dev/null 2>&1; then
             echo "ERROR: Cannot connect to Kubernetes cluster"
             echo "  KUBECONFIG: ${KUBECONFIG:-not set (using default)}"
             echo "  Current context: $(kubectl config current-context 2>&1 || echo 'none')"
             echo "  Available contexts: $(kubectl config get-contexts -o name 2>&1 | tr '\n' ', ' | sed 's/,$//')"
-            echo "  Cluster info error:"
-            kubectl cluster-info 2>&1 | sed 's/^/    /'
+            echo "  Connectivity check error:"
+            kubectl get --raw /healthz 2>&1 | sed 's/^/    /'
             errors=$((errors + 1))
+        else
+            echo "  Cluster API: $(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo 'in-cluster')"
         fi
     fi
 
