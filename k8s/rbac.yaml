@@ -9,6 +9,10 @@ kind: ClusterRole
 metadata:
   name: clopus-watcher
 rules:
+  # List namespaces for wildcard pattern matching
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]
   # Read pods and their status
   - apiGroups: [""]
     resources: ["pods", "pods/status"]
