@@ -23,48 +23,135 @@ sqlite3 $SQLITE_PATH "INSERT INTO fixes (run_id, timestamp, namespace, pod_name,
 
 ## WORKFLOW
 
-1. CHECK POD STATUS
-   ```bash
-   kubectl get pods -n $TARGET_NAMESPACE -o wide
-   ```
-   Look for: CrashLoopBackOff, Error, ImagePullBackOff, Pending (stuck)
+### STEP 1: CHECK POD STATUS
+```bash
+kubectl get pods -n $TARGET_NAMESPACE -o wide
+```
 
-2. CHECK POD LOGS FOR ERRORS (even if Running)
-   For each pod:
-   ```bash
-   kubectl logs <pod-name> -n $TARGET_NAMESPACE --tail=50 --timestamps
-   ```
-   Look for error patterns BUT check timestamps - only act on NEW errors since $LAST_RUN_TIME
+**Pod Status Issues to Detect:**
+| Status | Severity | Description |
+|--------|----------|-------------|
+| `CrashLoopBackOff` | Critical | Container repeatedly crashing |
+| `Error` | Critical | Container exited with error |
+| `OOMKilled` | Critical | Out of memory kill |
+| `ImagePullBackOff` | Critical | Cannot pull container image |
+| `ErrImagePull` | Critical | Image pull failed |
+| `CreateContainerConfigError` | Critical | Config error (secrets/configmaps) |
+| `CreateContainerError` | Critical | Container creation failed |
+| `RunContainerError` | Critical | Container failed to start |
+| `InvalidImageName` | Critical | Malformed image reference |
+| `Init:Error` | Critical | Init container failed |
+| `Init:CrashLoopBackOff` | Critical | Init container crash loop |
+| `Pending` (>5min) | Warning | Stuck pending, likely scheduling issue |
+| `ContainerCreating` (>5min) | Warning | Stuck creating, likely volume/image issue |
+| `Terminating` (>5min) | Warning | Stuck terminating, finalizer issue |
+| `Unknown` | Warning | Node communication lost |
+| `Evicted` | Warning | Pod evicted (resource pressure) |
 
-3. IF NEW DEGRADED POD FOUND:
-   a. Get details:
-      ```bash
-      kubectl describe pod <pod-name> -n $TARGET_NAMESPACE
-      ```
-   b. Get full logs:
-      ```bash
-      kubectl logs <pod-name> -n $TARGET_NAMESPACE --tail=100 --timestamps
-      kubectl logs <pod-name> -n $TARGET_NAMESPACE --previous --tail=100 --timestamps 2>/dev/null
-      ```
-   c. Record to database (with run_id)
+**Ready State Issues:**
+```bash
+kubectl get pods -n $TARGET_NAMESPACE -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\t"}{range .status.containerStatuses[*]}{.ready}{" "}{end}{"\n"}{end}'
+```
+- Pod showing `Running` but containers not ready (`0/1`, `1/2`, etc.) = probe failures
 
-4. ANALYZE THE ERROR
-   - Application code error? (null pointer, missing file, syntax error)
-   - Configuration error? (wrong env var, missing config)
-   - Resource error? (OOM, disk full)
-   - Image error? (pull failed, wrong tag)
+### STEP 2: CHECK EVENTS FOR ISSUES
+```bash
+kubectl get events -n $TARGET_NAMESPACE --sort-by='.lastTimestamp' --field-selector type!=Normal
+```
 
-5. IF FIXABLE via exec:
-   a. Exec into pod:
-      ```bash
-      kubectl exec -it <pod-name> -n $TARGET_NAMESPACE -- /bin/sh
-      ```
-   b. Apply fix
-   c. Verify fix works
-   d. Update database with fix_applied and status='success'
+**Event-Based Issues to Detect:**
+| Event Reason | Severity | Description |
+|--------------|----------|-------------|
+| `FailedScheduling` | Critical | Cannot schedule pod |
+| `FailedMount` | Critical | Volume mount failed |
+| `FailedAttachVolume` | Critical | PVC attach failed |
+| `NodeNotReady` | Critical | Node is down |
+| `Unhealthy` | Warning | Liveness/readiness probe failed |
+| `BackOff` | Warning | Back-off restarting |
+| `FailedCreate` | Warning | ReplicaSet failed to create pod |
+| `FailedKillPod` | Warning | Cannot kill pod |
+| `NetworkNotReady` | Warning | CNI not ready |
+| `FailedCreatePodSandBox` | Warning | Sandbox creation failed |
+| `DNSConfigForming` | Info | DNS config issue |
+| `Pulling` (>5min) | Warning | Slow/stuck image pull |
 
-6. IF NOT FIXABLE:
-   Update database with reason and status='failed'
+### STEP 3: CHECK POD LOGS FOR ERRORS
+For each pod (even if Running):
+```bash
+kubectl logs <pod-name> -n $TARGET_NAMESPACE --tail=50 --timestamps
+```
+
+**Log Patterns to Detect:**
+| Pattern | Category | Examples |
+|---------|----------|----------|
+| Exception/Error traces | Application | `NullPointerException`, `TypeError`, `panic:` |
+| Connection failures | Networking | `connection refused`, `ECONNREFUSED`, `timeout`, `no route to host` |
+| DNS failures | Networking | `could not resolve`, `NXDOMAIN`, `DNS lookup failed` |
+| Auth failures | Security | `401`, `403`, `permission denied`, `access denied`, `RBAC` |
+| Resource exhaustion | Resources | `out of memory`, `OOM`, `disk full`, `no space left`, `too many open files` |
+| Config errors | Configuration | `missing env`, `config not found`, `invalid configuration` |
+| Database errors | Dependencies | `connection pool exhausted`, `deadlock`, `too many connections` |
+| TLS/SSL errors | Security | `certificate expired`, `certificate verify failed`, `handshake failure` |
+
+### STEP 4: CHECK RESOURCE ISSUES
+```bash
+kubectl top pods -n $TARGET_NAMESPACE 2>/dev/null || echo "Metrics not available"
+kubectl describe nodes | grep -A5 "Allocated resources"
+```
+
+**Resource Issues:**
+- Pod using >90% of memory limit (OOM risk)
+- Pod using >90% of CPU limit (throttling)
+- Node under memory/disk pressure
+- PVC in Pending state
+
+### STEP 5: FOR EACH NEW ISSUE FOUND
+a. Get detailed info:
+```bash
+kubectl describe pod <pod-name> -n $TARGET_NAMESPACE
+```
+b. Get full logs (current and previous):
+```bash
+kubectl logs <pod-name> -n $TARGET_NAMESPACE --tail=100 --timestamps
+kubectl logs <pod-name> -n $TARGET_NAMESPACE --previous --tail=100 --timestamps 2>/dev/null
+```
+c. For init container issues:
+```bash
+kubectl logs <pod-name> -n $TARGET_NAMESPACE -c <init-container-name> --timestamps
+```
+d. Record to database (with run_id)
+
+### STEP 6: ANALYZE AND CATEGORIZE
+| Category | Fixable via Exec? | Common Fixes |
+|----------|-------------------|--------------|
+| Application crash | Sometimes | Restart, clear cache, fix permissions |
+| Config missing | No | Requires ConfigMap/Secret update |
+| Image pull | No | Requires image fix or registry auth |
+| OOM | No | Requires resource limit increase |
+| Volume mount | No | Requires PVC/storage fix |
+| Scheduling | No | Requires node/resource adjustment |
+| Probe failure | Sometimes | Fix endpoint, adjust probe timing |
+| Network/DNS | Sometimes | Check service, restart coredns |
+| Permission denied | Sometimes | Fix file permissions in container |
+
+### STEP 7: ATTEMPT FIX (if safe)
+Only attempt fixes that are SAFE and REVERSIBLE:
+```bash
+kubectl exec -it <pod-name> -n $TARGET_NAMESPACE -- /bin/sh
+```
+
+**Safe fixes:**
+- Clear temp/cache files
+- Fix file permissions
+- Restart internal processes
+- Remove lock files
+
+**DO NOT attempt:**
+- Modifying application code
+- Changing critical configs
+- Anything that could cause data loss
+
+Update database with fix_applied and status='success' or status='failed'
 
 ## CLOSING REPORT
 At the end, you MUST output a JSON report in this exact format:
@@ -77,7 +164,14 @@ At the end, you MUST output a JSON report in this exact format:
   "status": "<ok|fixed|failed>",
   "summary": "<one sentence summary>",
   "details": [
-    {"pod": "<name>", "issue": "<description>", "action": "<what was done>", "result": "<success|failed>"}
+    {
+      "pod": "<name>",
+      "issue": "<description>",
+      "severity": "<critical|warning|info>",
+      "category": "<application|config|resources|networking|scheduling|security|storage>",
+      "action": "<what was done>",
+      "result": "<success|failed|skipped>"
+    }
   ]
 }
 ===REPORT_END===
@@ -90,6 +184,7 @@ Status meanings:
 
 ## RULES
 - NEVER fix something that could break the application further
+- NEVER modify application code or critical configurations
 - ALWAYS verify fixes before marking success
 - ALWAYS check timestamps - ignore old errors
 - Record EVERYTHING to the database with the run_id

@@ -259,6 +259,9 @@
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-xs font-medium text-red-400 uppercase tracking-wider">Error</span>
                         <span class="px-2 py-0.5 bg-red-500/10 text-red-300 text-xs rounded font-mono">{{$fix.ErrorType}}</span>
+                        {{if $fix.Category}}
+                        <span class="px-2 py-0.5 bg-slate-500/10 text-slate-400 text-xs rounded font-medium">{{$fix.Category}}</span>
+                        {{end}}
                     </div>
                     {{if $fix.Issue}}
                     <p class="text-sm text-slate-300 leading-relaxed">{{$fix.Issue}}</p>

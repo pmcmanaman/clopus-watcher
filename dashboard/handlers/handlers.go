@@ -40,7 +40,10 @@ type ReportDetail struct {
 	Pod            string `json:"pod"`
 	Issue          string `json:"issue"`
 	Severity       string `json:"severity"`
+	Category       string `json:"category"`
 	Recommendation string `json:"recommendation"`
+	Action         string `json:"action"`
+	Result         string `json:"result"`
 }
 
 // FixWithRecommendation extends Fix with parsed recommendation data
@@ -48,6 +51,7 @@ type FixWithRecommendation struct {
 	db.Fix
 	Recommendation string
 	Severity       string
+	Category       string
 	Issue          string
 }
 
@@ -104,6 +108,7 @@ func enrichFixesWithRecommendations(fixes []db.Fix, report string) []FixWithReco
 			Fix:            fix,
 			Recommendation: "",
 			Severity:       "",
+			Category:       "",
 			Issue:          "",
 		}
 
@@ -111,6 +116,7 @@ func enrichFixesWithRecommendations(fixes []db.Fix, report string) []FixWithReco
 			if detail, ok := detailMap[fix.PodName]; ok {
 				result[i].Recommendation = detail.Recommendation
 				result[i].Severity = detail.Severity
+				result[i].Category = detail.Category
 				result[i].Issue = detail.Issue
 			}
 		}
