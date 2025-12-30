@@ -47,6 +47,8 @@ spec:
               value: {{ .Values.dashboard.service.targetPort | quote }}
             - name: LOG_PATH
               value: "/data/watcher.log"
+            - name: RETENTION_DAYS
+              value: {{ .Values.database.retentionDays | quote }}
           volumeMounts:
             - name: data
               mountPath: /data

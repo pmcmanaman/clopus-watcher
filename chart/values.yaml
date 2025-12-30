@@ -55,6 +55,11 @@ watcher:
   backoffLimit: 0
   ttlSecondsAfterFinished: 300
 
+# Database configuration
+database:
+  # Retention in days (0 to disable cleanup)
+  retentionDays: 30
+
 # Dashboard configuration
 dashboard:
   enabled: true

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +66,14 @@ func main() {
 		logPath = "/data/watcher.log"
 	}
 
+	// Database retention in days (default 30 days, 0 to disable)
+	retentionDays := 30
+	if retentionStr := os.Getenv("RETENTION_DAYS"); retentionStr != "" {
+		if parsed, err := strconv.Atoi(retentionStr); err == nil && parsed >= 0 {
+			retentionDays = parsed
+		}
+	}
+
 	database, err := db.New(sqlitePath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -99,6 +108,12 @@ func main() {
 
 	// Start metrics updater goroutine
 	go updateMetrics(database)
+
+	// Start database retention cleanup goroutine (if enabled)
+	if retentionDays > 0 {
+		log.Printf("Database retention enabled: %d days", retentionDays)
+		go runRetentionCleanup(database, retentionDays)
+	}
 
 	// Create a new mux for routing
 	mux := http.NewServeMux()
@@ -241,5 +256,30 @@ func refreshMetrics(database *db.DB) {
 				}
 			}
 		}
+	}
+}
+
+// runRetentionCleanup runs database cleanup periodically
+func runRetentionCleanup(database *db.DB, retentionDays int) {
+	// Run cleanup once at startup
+	performCleanup(database, retentionDays)
+
+	// Then run daily
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		performCleanup(database, retentionDays)
+	}
+}
+
+func performCleanup(database *db.DB, retentionDays int) {
+	deleted, err := database.CleanupOldRuns(retentionDays)
+	if err != nil {
+		log.Printf("Error during retention cleanup: %v", err)
+		return
+	}
+	if deleted > 0 {
+		log.Printf("Retention cleanup: deleted %d old runs (older than %d days)", deleted, retentionDays)
 	}
 }

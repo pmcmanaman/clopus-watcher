@@ -312,3 +312,34 @@ func (db *DB) GetStats() (total, success, failed, pending int, err error) {
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM fixes WHERE status = 'pending' OR status = 'analyzing'").Scan(&pending)
 	return
 }
+
+// CleanupOldRuns deletes runs and their associated fixes older than the specified number of days
+// Returns the number of deleted runs
+func (db *DB) CleanupOldRuns(retentionDays int) (int64, error) {
+	// First delete fixes associated with old runs
+	_, err := db.conn.Exec(`
+		DELETE FROM fixes WHERE run_id IN (
+			SELECT id FROM runs WHERE started_at < datetime('now', ? || ' days')
+		)
+	`, -retentionDays)
+	if err != nil {
+		return 0, err
+	}
+
+	// Then delete old runs
+	result, err := db.conn.Exec(`
+		DELETE FROM runs WHERE started_at < datetime('now', ? || ' days')
+	`, -retentionDays)
+	if err != nil {
+		return 0, err
+	}
+
+	deleted, _ := result.RowsAffected()
+
+	// Run VACUUM to reclaim space (only if we deleted something)
+	if deleted > 0 {
+		db.conn.Exec(`VACUUM`)
+	}
+
+	return deleted, nil
+}
