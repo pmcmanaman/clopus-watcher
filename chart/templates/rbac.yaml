@@ -7,6 +7,10 @@ metadata:
   labels:
     {{- include "clopus-watcher.labels" . | nindent 4 }}
 rules:
+  # List namespaces for wildcard pattern matching
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]
   # Read pods and their status
   - apiGroups: [""]
     resources: ["pods", "pods/status"]
