@@ -1,0 +1,20 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "clopus-watcher.fullname" . }}-test-rbac"
+  namespace: {{ include "clopus-watcher.namespace" . }}
+  labels:
+    {{- include "clopus-watcher.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  serviceAccountName: {{ include "clopus-watcher.serviceAccountName" . }}
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:1.28
+      command: ['kubectl']
+      args: ['auth', 'can-i', 'list', 'pods', '--all-namespaces']
+  restartPolicy: Never
+{{- end }}
