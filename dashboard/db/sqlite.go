@@ -417,6 +417,19 @@ func (db *DB) GetStats() (total, success, failed, pending int, err error) {
 	return
 }
 
+// DeleteRun deletes a specific run and its associated fixes
+func (db *DB) DeleteRun(runID int) error {
+	// Delete fixes associated with this run
+	_, err := db.conn.Exec(`DELETE FROM fixes WHERE run_id = ?`, runID)
+	if err != nil {
+		return err
+	}
+
+	// Delete the run
+	_, err = db.conn.Exec(`DELETE FROM runs WHERE id = ?`, runID)
+	return err
+}
+
 // ResetDatabase deletes all runs and fixes from the database
 func (db *DB) ResetDatabase() error {
 	// Delete all fixes first (foreign key)

@@ -50,6 +50,10 @@ spec:
               value: "/data/watcher.log"
             - name: RETENTION_DAYS
               value: {{ .Values.database.retentionDays | quote }}
+            - name: CRONJOB_NAME
+              value: {{ include "clopus-watcher.fullname" . }}
+            - name: CRONJOB_NAMESPACE
+              value: {{ include "clopus-watcher.namespace" . }}
           volumeMounts:
             - name: data
               mountPath: /data

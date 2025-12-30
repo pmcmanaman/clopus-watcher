@@ -176,8 +176,9 @@ func main() {
 	// Trigger route
 	mux.HandleFunc("/api/trigger", h.TriggerRun)
 
-	// Database reset route
+	// Database management routes
 	mux.HandleFunc("/api/reset", h.ResetDatabase)
+	mux.HandleFunc("/api/run/delete", h.DeleteRun)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
