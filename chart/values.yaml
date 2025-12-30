@@ -10,8 +10,24 @@ watcher:
   # Schedule for the CronJob (cron format)
   schedule: "*/5 * * * *"
 
-  # Target namespace to monitor
-  targetNamespace: "default"
+  # Target namespaces to monitor (supports wildcards)
+  # Examples:
+  #   - "default"           # Single namespace
+  #   - "production"        # Another single namespace
+  #   - "ms-*"              # All namespaces starting with "ms-"
+  #   - "*-staging"         # All namespaces ending with "-staging"
+  #   - "*"                 # All namespaces
+  targetNamespaces:
+    - default
+
+  # Namespaces to exclude (supports wildcards, applied after targetNamespaces)
+  # Examples:
+  #   - "kube-*"            # Exclude kube-system, kube-public, etc.
+  #   - "clopus-watcher"    # Exclude the watcher's own namespace
+  excludeNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
 
   # Watcher mode: "autonomous" (detect and fix) or "report" (detect only)
   mode: "autonomous"
@@ -176,3 +192,24 @@ tolerations: []
 
 # Affinity
 affinity: {}
+
+# Prometheus metrics configuration
+metrics:
+  # Enable metrics endpoint
+  enabled: true
+
+  # Metrics port (same as dashboard port)
+  port: 8080
+
+  # Metrics path
+  path: /metrics
+
+  # ServiceMonitor for Prometheus Operator
+  serviceMonitor:
+    enabled: false
+    # Scrape interval
+    interval: 30s
+    # Additional labels for ServiceMonitor
+    labels: {}
+    # Namespace for ServiceMonitor (defaults to release namespace)
+    namespace: ""
