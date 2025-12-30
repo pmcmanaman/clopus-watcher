@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
@@ -123,9 +126,45 @@ func main() {
 	// Apply logging middleware
 	handler := loggingMiddleware(mux)
 
+	// Create HTTP server with timeouts
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Channel to listen for shutdown signals
+	done := make(chan bool, 1)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Goroutine to handle shutdown
+	go func() {
+		<-quit
+		log.Println("Server is shutting down...")
+
+		// Create context with timeout for shutdown
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		server.SetKeepAlivesEnabled(false)
+		if err := server.Shutdown(ctx); err != nil {
+			log.Fatalf("Could not gracefully shutdown the server: %v", err)
+		}
+		close(done)
+	}()
+
 	log.Printf("Dashboard starting on port %s", port)
 	log.Printf("Metrics available at /metrics")
-	log.Fatal(http.ListenAndServe(":"+port, handler))
+
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Could not listen on port %s: %v", port, err)
+	}
+
+	<-done
+	log.Println("Server stopped")
 }
 
 // updateMetrics periodically updates Prometheus metrics from the database
