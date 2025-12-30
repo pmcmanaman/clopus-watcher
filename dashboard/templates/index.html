@@ -8,71 +8,285 @@
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'system-ui', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Outfit', 'system-ui', 'sans-serif'],
+                        mono: ['Geist Mono', 'monospace'],
+                    },
+                    colors: {
+                        surface: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            800: '#1e2330',
+                            850: '#181c26',
+                            900: '#12151c',
+                            950: '#0a0c10',
+                        },
+                        accent: {
+                            DEFAULT: '#22d3ee',
+                            dim: '#0891b2',
+                            glow: 'rgba(34, 211, 238, 0.15)',
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.4s ease-out',
+                        'slide-in-right': 'slideInRight 0.3s ease-out',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                        'spin-slow': 'spin 3s linear infinite',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        slideInRight: {
+                            '0%': { opacity: '0', transform: 'translateX(-10px)' },
+                            '100%': { opacity: '1', transform: 'translateX(0)' },
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 5px rgba(34, 211, 238, 0.2)' },
+                            '100%': { boxShadow: '0 0 20px rgba(34, 211, 238, 0.4)' },
+                        }
                     }
                 }
             }
         }
     </script>
     <style>
-        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        /* Scrollbar */
+        .scrollbar-thin::-webkit-scrollbar { width: 5px; height: 5px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-        .scrollbar-thin::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a3142; border-radius: 10px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #3a4256; }
+
+        /* Background texture */
+        .bg-grid {
+            background-image:
+                linear-gradient(rgba(34, 211, 238, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(34, 211, 238, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* Glassmorphism */
+        .glass {
+            background: rgba(30, 35, 48, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        /* Status indicators */
+        .status-pulse {
+            animation: statusPulse 2s ease-in-out infinite;
+        }
+        @keyframes statusPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Gradient text */
+        .text-gradient {
+            background: linear-gradient(135deg, #22d3ee 0%, #818cf8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Run item hover */
+        .run-item {
+            transition: all 0.2s ease;
+        }
+        .run-item:hover {
+            background: rgba(34, 211, 238, 0.05);
+            border-left-color: #22d3ee;
+        }
+        .run-item.active {
+            background: rgba(34, 211, 238, 0.08);
+            border-left-color: #22d3ee;
+        }
+
+        /* Card shine effect */
+        .card-shine {
+            position: relative;
+            overflow: hidden;
+        }
+        .card-shine::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(255, 255, 255, 0.03),
+                transparent
+            );
+            transition: left 0.5s ease;
+        }
+        .card-shine:hover::before {
+            left: 100%;
+        }
+
+        /* Progress ring */
+        .progress-ring {
+            transform: rotate(-90deg);
+        }
+        .progress-ring circle {
+            transition: stroke-dashoffset 0.5s ease;
+        }
+
+        /* Log syntax highlighting */
+        .log-line { line-height: 1.6; }
+        .log-error { color: #f87171; }
+        .log-warning { color: #fbbf24; }
+        .log-success { color: #34d399; }
+        .log-info { color: #60a5fa; }
+        .log-timestamp { color: #6b7280; }
+
+        /* Tooltip */
+        [data-tooltip] {
+            position: relative;
+        }
+        [data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            background: #1e2330;
+            border: 1px solid #2a3142;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        [data-tooltip]:hover::after {
+            opacity: 1;
+        }
+
+        /* Skeleton loading */
+        .skeleton {
+            background: linear-gradient(90deg, #1e2330 25%, #2a3142 50%, #1e2330 75%);
+            background-size: 200% 100%;
+            animation: skeleton 1.5s infinite;
+        }
+        @keyframes skeleton {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Staggered animation delays */
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
     </style>
 </head>
-<body class="bg-neutral-950 text-white min-h-screen font-sans">
+<body class="bg-surface-950 text-white min-h-screen font-sans antialiased">
+    <!-- Ambient background -->
+    <div class="fixed inset-0 bg-grid pointer-events-none"></div>
+    <div class="fixed top-0 left-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="fixed bottom-0 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
+
     <!-- Top Bar -->
-    <header class="fixed top-0 left-0 right-0 h-14 bg-neutral-900 border-b border-neutral-800 z-50">
-        <div class="h-full px-4 flex items-center justify-between">
-            <span class="font-semibold text-lg">Clopus Watcher</span>
+    <header class="fixed top-0 left-0 right-0 h-16 glass border-b border-white/5 z-50">
+        <div class="h-full px-6 flex items-center justify-between">
+            <!-- Logo & Title -->
             <div class="flex items-center gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-accent to-indigo-500 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-semibold tracking-tight">Clopus Watcher</h1>
+                        <p class="text-xs text-slate-500 font-mono">Kubernetes Auto-Healing</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-6">
                 <!-- Namespace Selector -->
-                <select id="ns-select"
-                        class="bg-neutral-800 border border-neutral-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-neutral-600"
-                        onchange="window.location.href='/?ns=' + this.value">
-                    {{if not .Namespaces}}
-                    <option value="">No namespaces yet</option>
-                    {{else}}
-                    {{range .Namespaces}}
-                    <option value="{{.Namespace}}" {{if eq $.CurrentNS .Namespace}}selected{{end}}>{{.Namespace}}</option>
-                    {{end}}
-                    {{end}}
-                </select>
-                <!-- Stats -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500 uppercase tracking-wider">Namespace</span>
+                    <div class="relative">
+                        <select id="ns-select"
+                                class="appearance-none bg-surface-800/80 border border-white/10 rounded-lg px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all cursor-pointer"
+                                onchange="window.location.href='/?ns=' + this.value">
+                            {{if not .Namespaces}}
+                            <option value="">No namespaces</option>
+                            {{else}}
+                            {{range .Namespaces}}
+                            <option value="{{.Namespace}}" {{if eq $.CurrentNS .Namespace}}selected{{end}}>{{.Namespace}}</option>
+                            {{end}}
+                            {{end}}
+                        </select>
+                        <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Stats Pills -->
                 {{if .Stats}}
                 <div id="header-stats"
-                     class="hidden sm:flex items-center gap-3 text-sm"
+                     class="hidden lg:flex items-center gap-2"
                      hx-get="/partials/stats?ns={{.CurrentNS}}"
                      hx-trigger="every 10s"
                      hx-swap="innerHTML">
-                    <span class="text-neutral-500">Runs</span>
-                    <span class="font-mono">{{.Stats.RunCount}}</span>
-                    <span class="text-neutral-600">|</span>
-                    <span class="text-emerald-500">{{.Stats.OkCount}} ok</span>
-                    <span class="text-neutral-600">|</span>
-                    <span class="text-amber-500">{{.Stats.FixedCount}} fixed</span>
-                    <span class="text-neutral-600">|</span>
-                    <span class="text-red-500">{{.Stats.FailedCount}} failed</span>
+                    {{template "stats.html" .Stats}}
                 </div>
                 {{end}}
+
+                <!-- Connection Status -->
+                <div class="flex items-center gap-2 text-xs">
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full status-pulse"></span>
+                    <span class="text-slate-400">Live</span>
+                </div>
             </div>
         </div>
     </header>
 
     <!-- Main Layout -->
-    <div class="pt-14 flex h-screen">
+    <div class="pt-16 flex h-screen">
         <!-- Runs Sidebar -->
-        <aside class="w-64 lg:w-72 border-r border-neutral-800 flex flex-col bg-neutral-900">
-            <div class="p-3 border-b border-neutral-800">
-                <h2 class="text-xs font-semibold uppercase tracking-wider text-neutral-500">Runs</h2>
+        <aside class="w-72 xl:w-80 border-r border-white/5 flex flex-col bg-surface-900/50">
+            <!-- Sidebar Header -->
+            <div class="p-4 border-b border-white/5">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500">Run History</h2>
+                    <button onclick="refreshRuns()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Refresh">
+                        <svg id="refresh-icon" class="w-4 h-4 text-slate-500 group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </button>
+                </div>
+                <!-- Quick filter -->
+                <div class="flex gap-1">
+                    <button onclick="filterRuns('all')" class="filter-btn active flex-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 transition-colors" data-filter="all">All</button>
+                    <button onclick="filterRuns('ok')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-emerald-500/10 hover:text-emerald-400 transition-colors" data-filter="ok">OK</button>
+                    <button onclick="filterRuns('fixed')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-amber-500/10 hover:text-amber-400 transition-colors" data-filter="fixed">Fixed</button>
+                    <button onclick="filterRuns('failed')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-colors" data-filter="failed">Issues</button>
+                </div>
             </div>
+
+            <!-- Runs List -->
             <div id="runs-list" class="flex-1 overflow-y-auto scrollbar-thin"
                  hx-get="/partials/runs?ns={{.CurrentNS}}"
                  hx-trigger="every 30s">
@@ -81,31 +295,49 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 flex flex-col min-w-0">
+        <main class="flex-1 flex flex-col min-w-0 bg-surface-950">
             {{if .SelectedRun}}
-            <div id="run-detail" class="flex-1 overflow-y-auto">
-                {{template "run-detail.html" (dict "Run" .SelectedRun "Fixes" .SelectedFixes)}}
+            <div id="run-detail" class="flex-1 overflow-y-auto scrollbar-thin">
+                {{template "run-detail.html" (dict "Run" .SelectedRun "Fixes" .SelectedFixes "Stats" .Stats)}}
             </div>
             {{else}}
-            <div class="flex-1 flex items-center justify-center text-neutral-500">
-                <div class="text-center">
-                    <p class="text-lg mb-2">No runs yet</p>
-                    <p class="text-sm text-neutral-600">Watcher runs every 5 minutes</p>
+            <!-- Empty State -->
+            <div class="flex-1 flex items-center justify-center">
+                <div class="text-center animate-fade-in">
+                    <div class="w-24 h-24 mx-auto mb-6 rounded-2xl bg-surface-800/50 border border-white/5 flex items-center justify-center">
+                        <svg class="w-12 h-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-medium text-slate-300 mb-2">Awaiting First Run</h3>
+                    <p class="text-slate-500 text-sm mb-4">Watcher monitors every 5 minutes</p>
+                    <div class="flex items-center justify-center gap-2 text-xs text-slate-600">
+                        <svg class="w-4 h-4 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        <span>Checking cluster health...</span>
+                    </div>
                 </div>
             </div>
             {{end}}
 
-            <!-- Live Log (collapsible) -->
-            <div class="border-t border-neutral-800">
-                <button onclick="toggleLog()" class="w-full px-4 py-2 flex items-center justify-between text-sm text-neutral-400 hover:bg-neutral-800/50">
-                    <span>Live Terminal</span>
-                    <svg id="log-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <!-- Live Log Panel -->
+            <div class="border-t border-white/5">
+                <button onclick="toggleLog()" class="w-full px-5 py-3 flex items-center justify-between text-sm hover:bg-white/[0.02] transition-colors group">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                        <span class="font-medium text-slate-300">Live Terminal</span>
+                        <span class="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs rounded-full font-mono">streaming</span>
+                    </div>
+                    <svg id="log-chevron" class="w-5 h-5 text-slate-500 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
                     </svg>
                 </button>
-                <div id="log-panel" class="hidden bg-neutral-950 border-t border-neutral-800">
+                <div id="log-panel" class="hidden bg-surface-950 border-t border-white/5">
                     <div id="live-log"
-                         class="h-48 p-3 font-mono text-xs text-neutral-400 overflow-y-auto scrollbar-thin"
+                         class="h-56 p-4 font-mono text-xs text-slate-400 overflow-y-auto scrollbar-thin leading-relaxed"
                          hx-get="/partials/log"
                          hx-trigger="every 3s"
                          hx-swap="innerHTML">
@@ -116,7 +348,22 @@
         </main>
     </div>
 
+    <!-- Keyboard shortcuts modal -->
+    <div id="shortcuts-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden items-center justify-center" onclick="toggleShortcuts()">
+        <div class="bg-surface-800 border border-white/10 rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up" onclick="event.stopPropagation()">
+            <h3 class="text-lg font-semibold mb-4">Keyboard Shortcuts</h3>
+            <div class="space-y-3 text-sm">
+                <div class="flex justify-between"><span class="text-slate-400">Navigate runs</span><span class="font-mono text-accent">j / k</span></div>
+                <div class="flex justify-between"><span class="text-slate-400">Toggle terminal</span><span class="font-mono text-accent">t</span></div>
+                <div class="flex justify-between"><span class="text-slate-400">Refresh runs</span><span class="font-mono text-accent">r</span></div>
+                <div class="flex justify-between"><span class="text-slate-400">Show shortcuts</span><span class="font-mono text-accent">?</span></div>
+            </div>
+            <button onclick="toggleShortcuts()" class="mt-6 w-full py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">Close</button>
+        </div>
+    </div>
+
     <script>
+        // Log panel toggle
         function toggleLog() {
             const panel = document.getElementById('log-panel');
             const chevron = document.getElementById('log-chevron');
@@ -132,8 +379,105 @@
             }).observe(logContainer, { childList: true });
         }
 
-        // Helper for templates
+        // Refresh runs with animation
+        function refreshRuns() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('animate-spin');
+            htmx.trigger('#runs-list', 'htmx:trigger');
+            setTimeout(() => icon.classList.remove('animate-spin'), 1000);
+        }
+
+        // Filter runs
+        let currentFilter = 'all';
+        function filterRuns(status) {
+            currentFilter = status;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-white/10');
+                if (btn.dataset.filter === status) {
+                    btn.classList.add('active', 'bg-white/10');
+                }
+            });
+
+            document.querySelectorAll('.run-item').forEach(item => {
+                if (status === 'all' || item.dataset.status === status ||
+                    (status === 'failed' && (item.dataset.status === 'failed' || item.dataset.status === 'issues_found'))) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // Keyboard shortcuts
+        function toggleShortcuts() {
+            const modal = document.getElementById('shortcuts-modal');
+            modal.classList.toggle('hidden');
+            modal.classList.toggle('flex');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+            switch(e.key) {
+                case '?':
+                    toggleShortcuts();
+                    break;
+                case 't':
+                    toggleLog();
+                    break;
+                case 'r':
+                    refreshRuns();
+                    break;
+                case 'j':
+                case 'k':
+                    navigateRuns(e.key === 'j' ? 1 : -1);
+                    break;
+            }
+        });
+
+        function navigateRuns(direction) {
+            const items = Array.from(document.querySelectorAll('.run-item:not([style*="display: none"])'));
+            const current = items.findIndex(item => item.classList.contains('active'));
+            const next = Math.max(0, Math.min(items.length - 1, current + direction));
+            if (items[next]) {
+                items[next].click();
+            }
+        }
+
+        // Relative time formatting
+        function formatRelativeTime(dateStr) {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = (now - date) / 1000;
+
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        // Template helper
         function dict(obj) { return obj; }
+
+        // Toast notification
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `fixed bottom-4 right-4 px-4 py-3 rounded-lg text-sm font-medium animate-slide-up z-50 ${
+                type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                type === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                'bg-accent/20 text-accent border border-accent/30'
+            }`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // HTMX events
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.detail.target.id === 'runs-list') {
+                filterRuns(currentFilter);
+            }
+        });
     </script>
 </body>
 </html>

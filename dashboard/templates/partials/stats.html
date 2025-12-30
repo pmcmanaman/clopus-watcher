@@ -1,14 +1,35 @@
 {{define "stats.html"}}
 {{if .}}
-<div class="flex items-center gap-3 text-sm">
-    <span class="text-neutral-500">Runs</span>
-    <span class="font-mono">{{.RunCount}}</span>
-    <span class="text-neutral-600">|</span>
-    <span class="text-emerald-500">{{.OkCount}} ok</span>
-    <span class="text-neutral-600">|</span>
-    <span class="text-amber-500">{{.FixedCount}} fixed</span>
-    <span class="text-neutral-600">|</span>
-    <span class="text-red-500">{{.FailedCount}} failed</span>
+<div class="flex items-center gap-2">
+    <!-- Total Runs -->
+    <div class="flex items-center gap-2 px-3 py-1.5 bg-surface-800/80 rounded-lg border border-white/5">
+        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <span class="font-mono text-sm font-medium text-white">{{.RunCount}}</span>
+        <span class="text-xs text-slate-500">runs</span>
+    </div>
+
+    <!-- OK -->
+    <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+        <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
+        <span class="font-mono text-sm font-medium text-emerald-400">{{.OkCount}}</span>
+        <span class="text-xs text-emerald-400/70">ok</span>
+    </div>
+
+    <!-- Fixed -->
+    <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/10 rounded-lg border border-amber-500/20">
+        <span class="w-1.5 h-1.5 bg-amber-400 rounded-full"></span>
+        <span class="font-mono text-sm font-medium text-amber-400">{{.FixedCount}}</span>
+        <span class="text-xs text-amber-400/70">fixed</span>
+    </div>
+
+    <!-- Failed -->
+    <div class="flex items-center gap-1.5 px-2.5 py-1.5 bg-red-500/10 rounded-lg border border-red-500/20">
+        <span class="w-1.5 h-1.5 bg-red-400 rounded-full"></span>
+        <span class="font-mono text-sm font-medium text-red-400">{{.FailedCount}}</span>
+        <span class="text-xs text-red-400/70">issues</span>
+    </div>
 </div>
 {{end}}
 {{end}}
