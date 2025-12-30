@@ -2,6 +2,60 @@
 set -e
 
 echo "=== Clopus Watcher Starting ==="
+
+# === CONFIGURATION VALIDATION ===
+validate_config() {
+    local errors=0
+
+    # Validate SQLITE_PATH
+    if [ -z "$SQLITE_PATH" ]; then
+        echo "WARNING: SQLITE_PATH not set, using default /data/watcher.db"
+        SQLITE_PATH="/data/watcher.db"
+    fi
+
+    # Validate SQLITE_PATH directory exists
+    SQLITE_DIR=$(dirname "$SQLITE_PATH")
+    if [ ! -d "$SQLITE_DIR" ]; then
+        echo "ERROR: SQLite directory does not exist: $SQLITE_DIR"
+        errors=$((errors + 1))
+    elif [ ! -w "$SQLITE_DIR" ]; then
+        echo "ERROR: SQLite directory is not writable: $SQLITE_DIR"
+        errors=$((errors + 1))
+    fi
+
+    # Validate kubectl is available
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "ERROR: kubectl not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    # Validate kubectl can connect to cluster
+    if ! kubectl cluster-info >/dev/null 2>&1; then
+        echo "ERROR: Cannot connect to Kubernetes cluster"
+        errors=$((errors + 1))
+    fi
+
+    # Validate sqlite3 is available
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "ERROR: sqlite3 not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    # Validate claude is available
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "ERROR: claude CLI not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    if [ $errors -gt 0 ]; then
+        echo "Configuration validation failed with $errors error(s)"
+        exit 1
+    fi
+
+    echo "Configuration validation passed"
+}
+
+validate_config
 echo "SQLite path: $SQLITE_PATH"
 
 # === SQL SAFETY FUNCTIONS ===
