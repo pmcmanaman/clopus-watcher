@@ -99,9 +99,22 @@ spec:
           nodeSelector:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.affinity }}
+          {{- if .Values.dashboard.enabled }}
           affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: {{ include "clopus-watcher.name" . }}-dashboard
+                      app.kubernetes.io/instance: {{ .Release.Name }}
+                      app.kubernetes.io/component: dashboard
+                  topologyKey: kubernetes.io/hostname
+            {{- with .Values.affinity }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- else if .Values.affinity }}
+          affinity:
+            {{- toYaml .Values.affinity | nindent 12 }}
           {{- end }}
           {{- with .Values.tolerations }}
           tolerations:

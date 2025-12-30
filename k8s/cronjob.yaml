@@ -75,3 +75,12 @@ spec:
             # - name: claude-credentials
             #   secret:
             #     secretName: claude-credentials
+          # Pod affinity ensures CronJob runs on same node as Dashboard
+          # Required to share ReadWriteOnce PVC
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: dashboard
+                  topologyKey: kubernetes.io/hostname
