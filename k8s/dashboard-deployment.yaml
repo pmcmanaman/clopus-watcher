@@ -30,6 +30,10 @@ spec:
               value: "8080"
             - name: LOG_PATH
               value: "/data/watcher.log"
+            - name: CRONJOB_NAME
+              value: "clopus-watcher"
+            - name: CRONJOB_NAMESPACE
+              value: "clopus-watcher"
           volumeMounts:
             - name: data
               mountPath: /data

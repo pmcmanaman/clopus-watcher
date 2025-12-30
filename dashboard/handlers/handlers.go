@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -8,13 +9,16 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
+	batchv1 "k8s.io/api/batch/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const defaultPageSize = 20
@@ -357,10 +361,24 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Printf("Error getting fixes for run %d: %v", runID, err)
 			}
+			// Filter fixes by namespace if a specific namespace is selected
+			if namespace != "" {
+				filteredFixes := []db.Fix{}
+				for _, fix := range fixes {
+					if fix.Namespace == namespace {
+						filteredFixes = append(filteredFixes, fix)
+					}
+				}
+				fixes = filteredFixes
+			}
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
 				for _, detail := range parsed.Details {
+					// Filter report details by namespace if a specific namespace is selected
+					if namespace != "" && detail.Namespace != namespace {
+						continue
+					}
 					reportDetails = append(reportDetails, ReportDetailWithCommands{
 						ReportDetail: detail,
 						Commands:     generateKubectlCommands(detail),
@@ -378,10 +396,24 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Printf("Error getting fixes for run %d: %v", runs[0].ID, err)
 			}
+			// Filter fixes by namespace if a specific namespace is selected
+			if namespace != "" {
+				filteredFixes := []db.Fix{}
+				for _, fix := range fixes {
+					if fix.Namespace == namespace {
+						filteredFixes = append(filteredFixes, fix)
+					}
+				}
+				fixes = filteredFixes
+			}
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
 				for _, detail := range parsed.Details {
+					// Filter report details by namespace if a specific namespace is selected
+					if namespace != "" && detail.Namespace != namespace {
+						continue
+					}
 					reportDetails = append(reportDetails, ReportDetailWithCommands{
 						ReportDetail: detail,
 						Commands:     generateKubectlCommands(detail),
@@ -486,6 +518,17 @@ func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 		// Continue with empty fixes rather than failing
 		fixes = []db.Fix{}
 	}
+
+	// Filter fixes by namespace if a specific namespace is selected
+	if namespace != "" {
+		filteredFixes := []db.Fix{}
+		for _, fix := range fixes {
+			if fix.Namespace == namespace {
+				filteredFixes = append(filteredFixes, fix)
+			}
+		}
+		fixes = filteredFixes
+	}
 	enrichedFixes := enrichFixesWithRecommendations(fixes, run.Report)
 
 	var reportSummary string
@@ -494,6 +537,10 @@ func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 		reportSummary = parsed.Summary
 		// Build details with commands
 		for _, detail := range parsed.Details {
+			// Filter report details by namespace if a specific namespace is selected
+			if namespace != "" && detail.Namespace != namespace {
+				continue
+			}
 			reportDetails = append(reportDetails, ReportDetailWithCommands{
 				ReportDetail: detail,
 				Commands:     generateKubectlCommands(detail),
@@ -841,6 +888,47 @@ func (h *Handler) Compare(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteRun deletes a specific run and its fixes
+func (h *Handler) DeleteRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	runIDStr := r.URL.Query().Get("id")
+	runID, err := validateRunID(runIDStr)
+	if err != nil || runID <= 0 {
+		log.Printf("Invalid run ID for delete: %s", runIDStr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid run ID",
+		})
+		return
+	}
+
+	err = h.db.DeleteRun(runID)
+	if err != nil {
+		log.Printf("Error deleting run %d: %v", runID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to delete run: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Deleted run %d", runID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Run #%d deleted successfully", runID),
+	})
+}
+
 // ResetDatabase clears all runs and fixes from the database
 func (h *Handler) ResetDatabase(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -896,35 +984,87 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		cronjobNamespace = "default"
 	}
 
-	// Generate unique job name
-	timestamp := time.Now().Unix()
-	jobName := fmt.Sprintf("%s-manual-%d", cronjobName, timestamp)
-
-	// Create job from cronjob using kubectl
-	cmd := exec.Command("kubectl", "create", "job", jobName,
-		"--from=cronjob/"+cronjobName,
-		"-n", cronjobNamespace)
-
-	output, err := cmd.CombinedOutput()
+	// Create Kubernetes client using in-cluster config
+	config, err := rest.InClusterConfig()
 	if err != nil {
-		log.Printf("Error triggering run: %v, output: %s", err, string(output))
+		log.Printf("Error creating in-cluster config: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   fmt.Sprintf("Failed to trigger run: %v", err),
-			"output":  string(output),
+			"error":   fmt.Sprintf("Failed to create k8s config: %v", err),
 		})
 		return
 	}
 
-	log.Printf("Triggered manual run: %s", jobName)
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Printf("Error creating kubernetes client: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to create k8s client: %v", err),
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Get the CronJob to use as template
+	cronJob, err := clientset.BatchV1().CronJobs(cronjobNamespace).Get(ctx, cronjobName, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("Error getting cronjob %s/%s: %v", cronjobNamespace, cronjobName, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to get CronJob: %v", err),
+		})
+		return
+	}
+
+	// Generate unique job name
+	timestamp := time.Now().Unix()
+	jobName := fmt.Sprintf("%s-manual-%d", cronjobName, timestamp)
+
+	// Create Job from CronJob spec
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: cronjobNamespace,
+			Labels: map[string]string{
+				"app":        "clopus-watcher",
+				"created-by": "dashboard",
+				"mode":       mode,
+			},
+			Annotations: map[string]string{
+				"cronjob.kubernetes.io/instantiate": "manual",
+			},
+		},
+		Spec: cronJob.Spec.JobTemplate.Spec,
+	}
+
+	// Create the job
+	createdJob, err := clientset.BatchV1().Jobs(cronjobNamespace).Create(ctx, job, metav1.CreateOptions{})
+	if err != nil {
+		log.Printf("Error creating job: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to create Job: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Triggered manual run: %s", createdJob.Name)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"job":     jobName,
+		"job":     createdJob.Name,
 		"mode":    mode,
-		"message": fmt.Sprintf("Run triggered successfully. Job: %s", jobName),
+		"message": fmt.Sprintf("Run triggered successfully. Job: %s", createdJob.Name),
 	})
 }

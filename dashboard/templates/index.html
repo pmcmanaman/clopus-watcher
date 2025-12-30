@@ -339,9 +339,7 @@
                             </button>
                             <div id="export-menu" class="hidden absolute right-0 mt-2 w-40 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-10">
                                 <a href="/api/export/runs?ns={{.CurrentNS}}&format=json" class="block px-3 py-2 text-sm hover:bg-white/5 rounded-t-lg">Export JSON</a>
-                                <a href="/api/export/runs?ns={{.CurrentNS}}&format=csv" class="block px-3 py-2 text-sm hover:bg-white/5">Export CSV</a>
-                                <div class="border-t border-white/5"></div>
-                                <button onclick="confirmResetDatabase()" class="w-full text-left block px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-b-lg">Reset Database</button>
+                                <a href="/api/export/runs?ns={{.CurrentNS}}&format=csv" class="block px-3 py-2 text-sm hover:bg-white/5 rounded-b-lg">Export CSV</a>
                             </div>
                         </div>
                     </div>
@@ -378,6 +376,16 @@
                  hx-get="/partials/runs?ns={{.CurrentNS}}"
                  hx-trigger="every 30s">
                 {{template "runs-list.html" .}}
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="p-3 border-t border-white/5">
+                <button onclick="confirmResetDatabase()" class="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg border border-red-500/20 hover:border-red-500/40 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                    Reset Database
+                </button>
             </div>
 
             <!-- Pagination Controls -->
@@ -618,6 +626,31 @@
         function toggleTriggerMenu() {
             const menu = document.getElementById('trigger-menu');
             menu.classList.toggle('hidden');
+        }
+
+        // Delete a specific run
+        async function deleteRun(runId) {
+            if (!confirm('Delete Run #' + runId + '? This will also delete all associated fixes. This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/run/delete?id=' + runId, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    setTimeout(() => {
+                        window.location.href = '/?ns=' + (new URLSearchParams(window.location.search).get('ns') || '');
+                    }, 500);
+                } else {
+                    showToast('Failed to delete run: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showToast('Error deleting run: ' + err.message, 'error');
+            }
         }
 
         // Reset database with confirmation
