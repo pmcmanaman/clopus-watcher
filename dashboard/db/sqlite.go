@@ -253,6 +253,7 @@ func (db *DB) GetLastRunTime(namespace string) (string, error) {
 // Namespace operations
 
 // GetNamespaces returns distinct individual namespaces extracted from comma-separated namespace fields
+// This is optimized to only return namespace names without computing stats (which is expensive)
 func (db *DB) GetNamespaces() ([]NamespaceStats, error) {
 	// First get all unique namespace strings from runs
 	rows, err := db.conn.Query(`SELECT DISTINCT namespace FROM runs ORDER BY namespace`)
@@ -277,14 +278,10 @@ func (db *DB) GetNamespaces() ([]NamespaceStats, error) {
 		}
 	}
 
-	// Build stats for each individual namespace
+	// Just return namespace names (stats computed only when selected)
 	var stats []NamespaceStats
 	for ns := range nsSet {
-		s, err := db.GetNamespaceStats(ns)
-		if err != nil {
-			continue
-		}
-		stats = append(stats, *s)
+		stats = append(stats, NamespaceStats{Namespace: ns})
 	}
 
 	// Sort by namespace name
@@ -297,42 +294,50 @@ func (db *DB) GetNamespaces() ([]NamespaceStats, error) {
 
 // GetNamespaceStats returns stats for runs that contain the given namespace
 // (namespace can be part of a comma-separated list in the database)
+// Optimized to use a single query instead of 4 separate queries
 func (db *DB) GetNamespaceStats(namespace string) (*NamespaceStats, error) {
 	var s NamespaceStats
 	s.Namespace = namespace
 
 	// Use pattern matching to find runs containing this namespace
-	// Match: exact, start with comma, end with comma, or in middle
 	pattern := "%" + namespace + "%"
 
+	// Single query to get all stats at once
 	err := db.conn.QueryRow(`
-		SELECT COUNT(*) FROM runs
-		WHERE namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%'
-	`, namespace, namespace, namespace, namespace).Scan(&s.RunCount)
-	if err != nil {
-		// Fallback to simple LIKE match
-		db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace LIKE ?`, pattern).Scan(&s.RunCount)
-	}
+		SELECT
+			COUNT(*) as run_count,
+			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
+			SUM(CASE WHEN status = 'fixed' THEN 1 ELSE 0 END) as fixed_count,
+			SUM(CASE WHEN status = 'failed' OR status = 'issues_found' THEN 1 ELSE 0 END) as failed_count
+		FROM runs
+		WHERE namespace = ? OR namespace LIKE ?
+	`, namespace, pattern).Scan(&s.RunCount, &s.OkCount, &s.FixedCount, &s.FailedCount)
 
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND status = 'ok'`, namespace, pattern).Scan(&s.OkCount)
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND status = 'fixed'`, namespace, pattern).Scan(&s.FixedCount)
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND (status = 'failed' OR status = 'issues_found')`, namespace, pattern).Scan(&s.FailedCount)
+	if err != nil {
+		return nil, err
+	}
 
 	return &s, nil
 }
 
 // GetAllNamespacesStats returns aggregated stats across all namespaces
+// Optimized to use a single query
 func (db *DB) GetAllNamespacesStats() (*NamespaceStats, error) {
 	var s NamespaceStats
 	s.Namespace = "All Namespaces"
 
-	err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&s.RunCount)
+	err := db.conn.QueryRow(`
+		SELECT
+			COUNT(*) as run_count,
+			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
+			SUM(CASE WHEN status = 'fixed' THEN 1 ELSE 0 END) as fixed_count,
+			SUM(CASE WHEN status = 'failed' OR status = 'issues_found' THEN 1 ELSE 0 END) as failed_count
+		FROM runs
+	`).Scan(&s.RunCount, &s.OkCount, &s.FixedCount, &s.FailedCount)
+
 	if err != nil {
 		return nil, err
 	}
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'ok'`).Scan(&s.OkCount)
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'fixed'`).Scan(&s.FixedCount)
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'failed' OR status = 'issues_found'`).Scan(&s.FailedCount)
 
 	return &s, nil
 }
