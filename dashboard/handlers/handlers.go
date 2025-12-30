@@ -135,22 +135,23 @@ type FixWithRecommendation struct {
 }
 
 type PageData struct {
-	Namespaces      []db.NamespaceStats
-	CurrentNS       string
-	Runs            []db.Run
-	SelectedRun     *db.Run
-	SelectedFixes   []FixWithRecommendation
-	Stats           *db.NamespaceStats
-	Log             string
-	ReportSummary   string
+	Namespaces        []db.NamespaceStats
+	CurrentNS         string
+	ShowAllNamespaces bool
+	Runs              []db.Run
+	SelectedRun       *db.Run
+	SelectedFixes     []FixWithRecommendation
+	Stats             *db.NamespaceStats
+	Log               string
+	ReportSummary     string
 	// Pagination
-	CurrentPage     int
-	TotalPages      int
-	TotalRuns       int
-	PageSize        int
+	CurrentPage       int
+	TotalPages        int
+	TotalRuns         int
+	PageSize          int
 	// Filters
-	StatusFilter    string
-	SearchQuery     string
+	StatusFilter      string
+	SearchQuery       string
 }
 
 func (h *Handler) readLog() string {
@@ -240,10 +241,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		namespaces = []db.NamespaceStats{}
 	}
 
-	// If no namespace selected and we have namespaces, select first
-	if namespace == "" && len(namespaces) > 0 {
-		namespace = namespaces[0].Namespace
-	}
+	// Empty namespace means "All Namespaces" - show runs from all namespaces
 
 	// Get total count for pagination
 	totalRuns, err := h.db.CountRuns(namespace, statusFilter, searchQuery)
@@ -310,23 +308,30 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("Error getting stats for namespace %s: %v", namespace, err)
 		}
+	} else {
+		// Aggregate stats across all namespaces
+		stats, err = h.db.GetAllNamespacesStats()
+		if err != nil {
+			log.Printf("Error getting all namespaces stats: %v", err)
+		}
 	}
 
 	data := PageData{
-		Namespaces:    namespaces,
-		CurrentNS:     namespace,
-		Runs:          runs,
-		SelectedRun:   selectedRun,
-		SelectedFixes: selectedFixes,
-		Stats:         stats,
-		Log:           h.readLog(),
-		ReportSummary: reportSummary,
-		CurrentPage:   page,
-		TotalPages:    totalPages,
-		TotalRuns:     totalRuns,
-		PageSize:      defaultPageSize,
-		StatusFilter:  statusFilter,
-		SearchQuery:   searchQuery,
+		Namespaces:        namespaces,
+		CurrentNS:         namespace,
+		ShowAllNamespaces: namespace == "",
+		Runs:              runs,
+		SelectedRun:       selectedRun,
+		SelectedFixes:     selectedFixes,
+		Stats:             stats,
+		Log:               h.readLog(),
+		ReportSummary:     reportSummary,
+		CurrentPage:       page,
+		TotalPages:        totalPages,
+		TotalRuns:         totalRuns,
+		PageSize:          defaultPageSize,
+		StatusFilter:      statusFilter,
+		SearchQuery:       searchQuery,
 	}
 
 	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -353,9 +358,10 @@ func (h *Handler) RunsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Runs      []db.Run
-		CurrentNS string
-	}{runs, namespace}
+		Runs              []db.Run
+		CurrentNS         string
+		ShowAllNamespaces bool
+	}{runs, namespace, namespace == ""}
 
 	if err := h.tmpl.ExecuteTemplate(w, "runs-list.html", data); err != nil {
 		log.Printf("Error executing runs-list template: %v", err)
@@ -412,9 +418,15 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := h.db.GetNamespaceStats(namespace)
+	var stats *db.NamespaceStats
+	var err error
+	if namespace != "" {
+		stats, err = h.db.GetNamespaceStats(namespace)
+	} else {
+		stats, err = h.db.GetAllNamespacesStats()
+	}
 	if err != nil {
-		log.Printf("Error getting stats for namespace %s: %v", namespace, err)
+		log.Printf("Error getting stats: %v", err)
 		http.Error(w, "Error retrieving stats", http.StatusInternalServerError)
 		return
 	}
