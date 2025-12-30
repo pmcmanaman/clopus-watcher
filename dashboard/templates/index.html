@@ -429,15 +429,65 @@
 
     <!-- Keyboard shortcuts modal -->
     <div id="shortcuts-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden items-center justify-center" onclick="toggleShortcuts()">
-        <div class="bg-surface-800 border border-white/10 rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up" onclick="event.stopPropagation()">
-            <h3 class="text-lg font-semibold mb-4">Keyboard Shortcuts</h3>
-            <div class="space-y-3 text-sm">
-                <div class="flex justify-between"><span class="text-slate-400">Navigate runs</span><span class="font-mono text-accent">j / k</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">Toggle terminal</span><span class="font-mono text-accent">t</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">Refresh runs</span><span class="font-mono text-accent">r</span></div>
-                <div class="flex justify-between"><span class="text-slate-400">Show shortcuts</span><span class="font-mono text-accent">?</span></div>
+        <div class="bg-surface-800 dark:bg-surface-800 border border-white/10 rounded-2xl p-6 max-w-lg w-full mx-4 animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-semibold flex items-center gap-2">
+                    <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                    </svg>
+                    Keyboard Shortcuts
+                </h3>
+                <button onclick="toggleShortcuts()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors">
+                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
             </div>
-            <button onclick="toggleShortcuts()" class="mt-6 w-full py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">Close</button>
+
+            <div class="grid grid-cols-2 gap-4">
+                <!-- Navigation -->
+                <div class="space-y-3">
+                    <h4 class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Navigation</h4>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Next run</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">j</kbd>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Previous run</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">k</kbd>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Focus search</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">/</kbd>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="space-y-3">
+                    <h4 class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Actions</h4>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Refresh runs</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">r</kbd>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Toggle terminal</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">t</kbd>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Toggle theme</span>
+                        <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">d</kbd>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-white/5">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-slate-400">Show this help</span>
+                    <kbd class="px-2 py-1 bg-surface-900 rounded text-xs font-mono text-accent border border-white/10">?</kbd>
+                </div>
+            </div>
+
+            <p class="mt-4 text-xs text-slate-500 text-center">Press <kbd class="px-1.5 py-0.5 bg-surface-900 rounded text-accent border border-white/10">Esc</kbd> to close</p>
         </div>
     </div>
 
@@ -523,7 +573,16 @@
         }
 
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            // Allow Escape to close modal from anywhere
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('shortcuts-modal');
+                if (!modal.classList.contains('hidden')) {
+                    toggleShortcuts();
+                    return;
+                }
+            }
+
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
 
             switch(e.key) {
                 case '?':
@@ -534,6 +593,13 @@
                     break;
                 case 'r':
                     refreshRuns();
+                    break;
+                case 'd':
+                    toggleTheme();
+                    break;
+                case '/':
+                    e.preventDefault();
+                    document.querySelector('input[name="q"]')?.focus();
                     break;
                 case 'j':
                 case 'k':
