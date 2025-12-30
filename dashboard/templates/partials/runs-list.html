@@ -2,7 +2,7 @@
 {{if .Runs}}
 <div class="divide-y divide-white/5">
     {{range $index, $run := .Runs}}
-    <a href="/?ns={{$run.Namespace}}&run={{$run.ID}}"
+    <a href="/?ns={{$.CurrentNS}}&run={{$run.ID}}"
        class="run-item block px-4 py-3.5 border-l-2 border-transparent transition-all"
        data-status="{{$run.Status}}"
        style="animation: slideInRight 0.3s ease-out {{$index}}00ms both;">

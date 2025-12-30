@@ -116,6 +116,7 @@ type ReportJSON struct {
 
 // ReportDetail represents a single issue detail from the report
 type ReportDetail struct {
+	Namespace      string `json:"namespace"`
 	Pod            string `json:"pod"`
 	Issue          string `json:"issue"`
 	Severity       string `json:"severity"`
@@ -123,6 +124,78 @@ type ReportDetail struct {
 	Recommendation string `json:"recommendation"`
 	Action         string `json:"action"`
 	Result         string `json:"result"`
+}
+
+// ReportDetailWithCommands extends ReportDetail with suggested kubectl commands
+type ReportDetailWithCommands struct {
+	ReportDetail
+	Commands []string
+}
+
+// generateKubectlCommands generates helpful kubectl commands based on the issue
+func generateKubectlCommands(detail ReportDetail) []string {
+	var commands []string
+	ns := detail.Namespace
+	pod := detail.Pod
+
+	if ns == "" {
+		ns = "default"
+	}
+
+	switch detail.Category {
+	case "scheduling":
+		commands = append(commands,
+			fmt.Sprintf("kubectl describe pod %s -n %s", pod, ns),
+			fmt.Sprintf("kubectl get events -n %s --field-selector involvedObject.name=%s", ns, pod),
+			"kubectl describe nodes | grep -A5 'Allocated resources'",
+			"kubectl top nodes",
+		)
+		if strings.Contains(strings.ToLower(detail.Issue), "karpenter") {
+			commands = append(commands,
+				"kubectl get provisioners -A",
+				"kubectl logs -n karpenter -l app.kubernetes.io/name=karpenter --tail=50",
+			)
+		}
+	case "crash", "crashloop":
+		commands = append(commands,
+			fmt.Sprintf("kubectl logs %s -n %s --tail=100", pod, ns),
+			fmt.Sprintf("kubectl logs %s -n %s --previous --tail=100", pod, ns),
+			fmt.Sprintf("kubectl describe pod %s -n %s", pod, ns),
+			fmt.Sprintf("kubectl get events -n %s --field-selector involvedObject.name=%s --sort-by='.lastTimestamp'", ns, pod),
+		)
+	case "oom", "memory":
+		commands = append(commands,
+			fmt.Sprintf("kubectl describe pod %s -n %s | grep -A10 'Containers:'", pod, ns),
+			fmt.Sprintf("kubectl top pod %s -n %s", pod, ns),
+			fmt.Sprintf("kubectl logs %s -n %s --tail=100", pod, ns),
+		)
+	case "image", "imagepull":
+		commands = append(commands,
+			fmt.Sprintf("kubectl describe pod %s -n %s | grep -A5 'Events:'", pod, ns),
+			fmt.Sprintf("kubectl get pod %s -n %s -o jsonpath='{.spec.containers[*].image}'", pod, ns),
+		)
+	case "network", "connectivity":
+		commands = append(commands,
+			fmt.Sprintf("kubectl exec -n %s %s -- ping -c 3 8.8.8.8", ns, pod),
+			fmt.Sprintf("kubectl get svc -n %s", ns),
+			fmt.Sprintf("kubectl get endpoints -n %s", ns),
+		)
+	case "config", "configuration":
+		commands = append(commands,
+			fmt.Sprintf("kubectl get pod %s -n %s -o yaml", pod, ns),
+			fmt.Sprintf("kubectl get configmaps -n %s", ns),
+			fmt.Sprintf("kubectl get secrets -n %s", ns),
+		)
+	default:
+		// General debugging commands
+		commands = append(commands,
+			fmt.Sprintf("kubectl describe pod %s -n %s", pod, ns),
+			fmt.Sprintf("kubectl logs %s -n %s --tail=100", pod, ns),
+			fmt.Sprintf("kubectl get events -n %s --field-selector involvedObject.name=%s", ns, pod),
+		)
+	}
+
+	return commands
 }
 
 // FixWithRecommendation extends Fix with parsed recommendation data
@@ -144,6 +217,7 @@ type PageData struct {
 	Stats             *db.NamespaceStats
 	Log               string
 	ReportSummary     string
+	ReportDetails     []ReportDetailWithCommands
 	// Pagination
 	CurrentPage       int
 	TotalPages        int
@@ -268,6 +342,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	var selectedRun *db.Run
 	var selectedFixes []FixWithRecommendation
 	var reportSummary string
+	var reportDetails []ReportDetailWithCommands
 
 	// If run specified, get it; otherwise get latest
 	if runID > 0 {
@@ -283,6 +358,12 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
+				for _, detail := range parsed.Details {
+					reportDetails = append(reportDetails, ReportDetailWithCommands{
+						ReportDetail: detail,
+						Commands:     generateKubectlCommands(detail),
+					})
+				}
 			}
 		}
 	} else if len(runs) > 0 {
@@ -298,6 +379,12 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
+				for _, detail := range parsed.Details {
+					reportDetails = append(reportDetails, ReportDetailWithCommands{
+						ReportDetail: detail,
+						Commands:     generateKubectlCommands(detail),
+					})
+				}
 			}
 		}
 	}
@@ -326,6 +413,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		Stats:             stats,
 		Log:               h.readLog(),
 		ReportSummary:     reportSummary,
+		ReportDetails:     reportDetails,
 		CurrentPage:       page,
 		TotalPages:        totalPages,
 		TotalRuns:         totalRuns,
@@ -394,15 +482,24 @@ func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 	enrichedFixes := enrichFixesWithRecommendations(fixes, run.Report)
 
 	var reportSummary string
+	var reportDetails []ReportDetailWithCommands
 	if parsed, _ := parseReportJSON(run.Report); parsed != nil {
 		reportSummary = parsed.Summary
+		// Build details with commands
+		for _, detail := range parsed.Details {
+			reportDetails = append(reportDetails, ReportDetailWithCommands{
+				ReportDetail: detail,
+				Commands:     generateKubectlCommands(detail),
+			})
+		}
 	}
 
 	data := struct {
 		Run           *db.Run
 		Fixes         []FixWithRecommendation
 		ReportSummary string
-	}{run, enrichedFixes, reportSummary}
+		ReportDetails []ReportDetailWithCommands
+	}{run, enrichedFixes, reportSummary, reportDetails}
 
 	if err := h.tmpl.ExecuteTemplate(w, "run-detail.html", data); err != nil {
 		log.Printf("Error executing run-detail template: %v", err)

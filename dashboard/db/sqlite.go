@@ -2,6 +2,8 @@ package db
 
 import (
 	"database/sql"
+	"sort"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -141,6 +143,7 @@ func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
 }
 
 // GetRunsPaginated returns runs with pagination and optional filters
+// Namespace filtering uses LIKE to match runs containing the namespace in comma-separated lists
 func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, search string) ([]Run, error) {
 	query := `
 		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
@@ -151,8 +154,9 @@ func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, sear
 	args := []interface{}{}
 
 	if namespace != "" {
-		query += " AND namespace = ?"
-		args = append(args, namespace)
+		// Match namespace in comma-separated list: exact match, at start, at end, or in middle
+		query += " AND (namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%')"
+		args = append(args, namespace, namespace, namespace, namespace)
 	}
 
 	if status != "" {
@@ -193,13 +197,15 @@ func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, sear
 }
 
 // CountRuns returns total count of runs matching filters
+// Namespace filtering uses LIKE to match runs containing the namespace in comma-separated lists
 func (db *DB) CountRuns(namespace, status, search string) (int, error) {
 	query := "SELECT COUNT(*) FROM runs WHERE 1=1"
 	args := []interface{}{}
 
 	if namespace != "" {
-		query += " AND namespace = ?"
-		args = append(args, namespace)
+		// Match namespace in comma-separated list: exact match, at start, at end, or in middle
+		query += " AND (namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%')"
+		args = append(args, namespace, namespace, namespace, namespace)
 	}
 
 	if status != "" {
@@ -246,49 +252,71 @@ func (db *DB) GetLastRunTime(namespace string) (string, error) {
 
 // Namespace operations
 
+// GetNamespaces returns distinct individual namespaces extracted from comma-separated namespace fields
 func (db *DB) GetNamespaces() ([]NamespaceStats, error) {
-	rows, err := db.conn.Query(`
-		SELECT
-			namespace,
-			COUNT(*) as run_count,
-			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
-			SUM(CASE WHEN status = 'fixed' THEN 1 ELSE 0 END) as fixed_count,
-			SUM(CASE WHEN status = 'failed' OR status = 'issues_found' THEN 1 ELSE 0 END) as failed_count
-		FROM runs
-		GROUP BY namespace
-		ORDER BY namespace
-	`)
+	// First get all unique namespace strings from runs
+	rows, err := db.conn.Query(`SELECT DISTINCT namespace FROM runs ORDER BY namespace`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var stats []NamespaceStats
+	// Parse comma-separated namespaces and collect unique ones
+	nsSet := make(map[string]bool)
 	for rows.Next() {
-		var s NamespaceStats
-		err := rows.Scan(&s.Namespace, &s.RunCount, &s.OkCount, &s.FixedCount, &s.FailedCount)
-		if err != nil {
+		var nsField string
+		if err := rows.Scan(&nsField); err != nil {
 			return nil, err
 		}
-		stats = append(stats, s)
+		// Split by comma and add each namespace
+		for _, ns := range strings.Split(nsField, ",") {
+			ns = strings.TrimSpace(ns)
+			if ns != "" {
+				nsSet[ns] = true
+			}
+		}
 	}
+
+	// Build stats for each individual namespace
+	var stats []NamespaceStats
+	for ns := range nsSet {
+		s, err := db.GetNamespaceStats(ns)
+		if err != nil {
+			continue
+		}
+		stats = append(stats, *s)
+	}
+
+	// Sort by namespace name
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].Namespace < stats[j].Namespace
+	})
+
 	return stats, nil
 }
 
+// GetNamespaceStats returns stats for runs that contain the given namespace
+// (namespace can be part of a comma-separated list in the database)
 func (db *DB) GetNamespaceStats(namespace string) (*NamespaceStats, error) {
 	var s NamespaceStats
 	s.Namespace = namespace
 
-	err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace = ?`, namespace).Scan(&s.RunCount)
+	// Use pattern matching to find runs containing this namespace
+	// Match: exact, start with comma, end with comma, or in middle
+	pattern := "%" + namespace + "%"
+
+	err := db.conn.QueryRow(`
+		SELECT COUNT(*) FROM runs
+		WHERE namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%'
+	`, namespace, namespace, namespace, namespace).Scan(&s.RunCount)
 	if err != nil {
-		return nil, err
+		// Fallback to simple LIKE match
+		db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace LIKE ?`, pattern).Scan(&s.RunCount)
 	}
-	// Count 'ok' status as ok
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace = ? AND status = 'ok'`, namespace).Scan(&s.OkCount)
-	// Count 'fixed' status as fixed
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace = ? AND status = 'fixed'`, namespace).Scan(&s.FixedCount)
-	// Count 'failed' and 'issues_found' as failed (issues that need attention)
-	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE namespace = ? AND (status = 'failed' OR status = 'issues_found')`, namespace).Scan(&s.FailedCount)
+
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND status = 'ok'`, namespace, pattern).Scan(&s.OkCount)
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND status = 'fixed'`, namespace, pattern).Scan(&s.FixedCount)
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE (namespace = ? OR namespace LIKE ?) AND (status = 'failed' OR status = 'issues_found')`, namespace, pattern).Scan(&s.FailedCount)
 
 	return &s, nil
 }
