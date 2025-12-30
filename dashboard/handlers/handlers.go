@@ -642,3 +642,84 @@ func (h *Handler) writeFixesCSV(w http.ResponseWriter, fixes []db.Fix) {
 		})
 	}
 }
+
+// CompareData holds data for run comparison view
+type CompareData struct {
+	Run1          *db.Run
+	Run2          *db.Run
+	Fixes1        []FixWithRecommendation
+	Fixes2        []FixWithRecommendation
+	Report1       *ReportJSON
+	Report2       *ReportJSON
+	Namespaces    []db.NamespaceStats
+	AvailableRuns []db.Run
+}
+
+// Compare shows two runs side by side
+func (h *Handler) Compare(w http.ResponseWriter, r *http.Request) {
+	run1Str := r.URL.Query().Get("run1")
+	run2Str := r.URL.Query().Get("run2")
+
+	run1ID, err := validateRunID(run1Str)
+	if err != nil {
+		log.Printf("Invalid run1 ID: %s", run1Str)
+		http.Error(w, "Invalid run1 ID", http.StatusBadRequest)
+		return
+	}
+
+	run2ID, err := validateRunID(run2Str)
+	if err != nil {
+		log.Printf("Invalid run2 ID: %s", run2Str)
+		http.Error(w, "Invalid run2 ID", http.StatusBadRequest)
+		return
+	}
+
+	namespaces, err := h.db.GetNamespaces()
+	if err != nil {
+		log.Printf("Error getting namespaces: %v", err)
+		namespaces = []db.NamespaceStats{}
+	}
+
+	// Get available runs for selection dropdown
+	availableRuns, err := h.db.GetRuns("", 100)
+	if err != nil {
+		log.Printf("Error getting available runs: %v", err)
+		availableRuns = []db.Run{}
+	}
+
+	data := CompareData{
+		Namespaces:    namespaces,
+		AvailableRuns: availableRuns,
+	}
+
+	// Load run 1 if specified
+	if run1ID > 0 {
+		run1, err := h.db.GetRun(run1ID)
+		if err != nil {
+			log.Printf("Error getting run1 %d: %v", run1ID, err)
+		} else {
+			data.Run1 = run1
+			fixes, _ := h.db.GetFixesByRun(run1ID)
+			data.Fixes1 = enrichFixesWithRecommendations(fixes, run1.Report)
+			data.Report1, _ = parseReportJSON(run1.Report)
+		}
+	}
+
+	// Load run 2 if specified
+	if run2ID > 0 {
+		run2, err := h.db.GetRun(run2ID)
+		if err != nil {
+			log.Printf("Error getting run2 %d: %v", run2ID, err)
+		} else {
+			data.Run2 = run2
+			fixes, _ := h.db.GetFixesByRun(run2ID)
+			data.Fixes2 = enrichFixesWithRecommendations(fixes, run2.Report)
+			data.Report2, _ = parseReportJSON(run2.Report)
+		}
+	}
+
+	if err := h.tmpl.ExecuteTemplate(w, "compare.html", data); err != nil {
+		log.Printf("Error executing compare template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}

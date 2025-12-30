@@ -133,6 +133,7 @@ func main() {
 
 	// Page routes
 	mux.HandleFunc("/", h.Index)
+	mux.HandleFunc("/compare", h.Compare)
 
 	// HTMX partial routes
 	mux.HandleFunc("/partials/runs", h.RunsList)

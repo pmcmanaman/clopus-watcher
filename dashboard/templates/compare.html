@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compare Runs - Clopus Watcher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            text: '#c9d1d9',
+                            muted: '#8b949e'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .status-ok { color: #3fb950; }
+        .status-fixed { color: #58a6ff; }
+        .status-failed { color: #f85149; }
+        .status-issues { color: #d29922; }
+        .status-running { color: #a371f7; }
+
+        .diff-better { background: rgba(63, 185, 80, 0.15); }
+        .diff-worse { background: rgba(248, 81, 73, 0.15); }
+        .diff-same { background: transparent; }
+    </style>
+</head>
+<body class="bg-dark-bg text-dark-text min-h-screen dark:bg-dark-bg dark:text-dark-text bg-gray-50 text-gray-900">
+    <!-- Header -->
+    <header class="bg-dark-card dark:bg-dark-card bg-white border-b border-dark-border dark:border-dark-border border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <a href="/" class="text-dark-muted hover:text-dark-text dark:text-dark-muted dark:hover:text-dark-text text-gray-500 hover:text-gray-900">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                    </svg>
+                </a>
+                <h1 class="text-xl font-semibold">Compare Runs</h1>
+            </div>
+            <div class="text-sm text-dark-muted dark:text-dark-muted text-gray-500">
+                Select two runs to compare side by side
+            </div>
+        </div>
+    </header>
+
+    <!-- Run Selectors -->
+    <div class="px-6 py-4 bg-dark-card dark:bg-dark-card bg-white border-b border-dark-border dark:border-dark-border border-gray-200">
+        <form method="GET" action="/compare" class="flex items-center gap-4 flex-wrap">
+            <div class="flex items-center gap-2">
+                <label class="text-sm font-medium">Run 1:</label>
+                <select name="run1" onchange="this.form.submit()"
+                    class="bg-dark-bg dark:bg-dark-bg bg-gray-100 border border-dark-border dark:border-dark-border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px]">
+                    <option value="">Select a run...</option>
+                    {{range .AvailableRuns}}
+                    <option value="{{.ID}}" {{if $.Run1}}{{if eq $.Run1.ID .ID}}selected{{end}}{{end}}>
+                        #{{.ID}} - {{.Namespace}} ({{.Status}}) - {{.StartedAt}}
+                    </option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm font-medium">Run 2:</label>
+                <select name="run2" onchange="this.form.submit()"
+                    class="bg-dark-bg dark:bg-dark-bg bg-gray-100 border border-dark-border dark:border-dark-border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px]">
+                    <option value="">Select a run...</option>
+                    {{range .AvailableRuns}}
+                    <option value="{{.ID}}" {{if $.Run2}}{{if eq $.Run2.ID .ID}}selected{{end}}{{end}}>
+                        #{{.ID}} - {{.Namespace}} ({{.Status}}) - {{.StartedAt}}
+                    </option>
+                    {{end}}
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
+                Compare
+            </button>
+        </form>
+    </div>
+
+    <!-- Comparison Content -->
+    <main class="p-6">
+        {{if and .Run1 .Run2}}
+        <!-- Summary Comparison -->
+        <div class="grid grid-cols-2 gap-6 mb-6">
+            <!-- Run 1 Summary -->
+            <div class="bg-dark-card dark:bg-dark-card bg-white rounded-lg border border-dark-border dark:border-dark-border border-gray-200 p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Run #{{.Run1.ID}}</h2>
+                    <span class="px-2 py-1 rounded text-xs font-medium
+                        {{if eq .Run1.Status "ok"}}bg-green-500/20 text-green-400
+                        {{else if eq .Run1.Status "fixed"}}bg-blue-500/20 text-blue-400
+                        {{else if eq .Run1.Status "failed"}}bg-red-500/20 text-red-400
+                        {{else if eq .Run1.Status "issues_found"}}bg-yellow-500/20 text-yellow-400
+                        {{else}}bg-purple-500/20 text-purple-400{{end}}">
+                        {{.Run1.Status}}
+                    </span>
+                </div>
+                <dl class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Namespace</dt>
+                        <dd>{{.Run1.Namespace}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Started</dt>
+                        <dd>{{.Run1.StartedAt}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Ended</dt>
+                        <dd>{{if .Run1.EndedAt}}{{.Run1.EndedAt}}{{else}}-{{end}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Mode</dt>
+                        <dd>{{.Run1.Mode}}</dd>
+                    </div>
+                </dl>
+            </div>
+
+            <!-- Run 2 Summary -->
+            <div class="bg-dark-card dark:bg-dark-card bg-white rounded-lg border border-dark-border dark:border-dark-border border-gray-200 p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Run #{{.Run2.ID}}</h2>
+                    <span class="px-2 py-1 rounded text-xs font-medium
+                        {{if eq .Run2.Status "ok"}}bg-green-500/20 text-green-400
+                        {{else if eq .Run2.Status "fixed"}}bg-blue-500/20 text-blue-400
+                        {{else if eq .Run2.Status "failed"}}bg-red-500/20 text-red-400
+                        {{else if eq .Run2.Status "issues_found"}}bg-yellow-500/20 text-yellow-400
+                        {{else}}bg-purple-500/20 text-purple-400{{end}}">
+                        {{.Run2.Status}}
+                    </span>
+                </div>
+                <dl class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Namespace</dt>
+                        <dd>{{.Run2.Namespace}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Started</dt>
+                        <dd>{{.Run2.StartedAt}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Ended</dt>
+                        <dd>{{if .Run2.EndedAt}}{{.Run2.EndedAt}}{{else}}-{{end}}</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-dark-muted dark:text-dark-muted text-gray-500">Mode</dt>
+                        <dd>{{.Run2.Mode}}</dd>
+                    </div>
+                </dl>
+            </div>
+        </div>
+
+        <!-- Metrics Comparison -->
+        <div class="bg-dark-card dark:bg-dark-card bg-white rounded-lg border border-dark-border dark:border-dark-border border-gray-200 p-4 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Metrics Comparison</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-dark-border dark:border-dark-border border-gray-200">
+                            <th class="text-left py-2 text-dark-muted dark:text-dark-muted text-gray-500">Metric</th>
+                            <th class="text-center py-2">Run #{{.Run1.ID}}</th>
+                            <th class="text-center py-2">Run #{{.Run2.ID}}</th>
+                            <th class="text-center py-2">Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b border-dark-border/50 dark:border-dark-border/50 border-gray-100">
+                            <td class="py-3">Pods Monitored</td>
+                            <td class="text-center">{{.Run1.PodCount}}</td>
+                            <td class="text-center">{{.Run2.PodCount}}</td>
+                            <td class="text-center">
+                                {{$diff := subtract .Run2.PodCount .Run1.PodCount}}
+                                {{if gt $diff 0}}<span class="text-blue-400">+{{$diff}}</span>
+                                {{else if lt $diff 0}}<span class="text-yellow-400">{{$diff}}</span>
+                                {{else}}<span class="text-dark-muted">-</span>{{end}}
+                            </td>
+                        </tr>
+                        <tr class="border-b border-dark-border/50 dark:border-dark-border/50 border-gray-100">
+                            <td class="py-3">Errors Found</td>
+                            <td class="text-center {{if gt .Run1.ErrorCount 0}}text-red-400{{end}}">{{.Run1.ErrorCount}}</td>
+                            <td class="text-center {{if gt .Run2.ErrorCount 0}}text-red-400{{end}}">{{.Run2.ErrorCount}}</td>
+                            <td class="text-center">
+                                {{$diff := subtract .Run2.ErrorCount .Run1.ErrorCount}}
+                                {{if gt $diff 0}}<span class="text-red-400">+{{$diff}}</span>
+                                {{else if lt $diff 0}}<span class="text-green-400">{{$diff}}</span>
+                                {{else}}<span class="text-dark-muted">-</span>{{end}}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="py-3">Fixes Applied</td>
+                            <td class="text-center {{if gt .Run1.FixCount 0}}text-blue-400{{end}}">{{.Run1.FixCount}}</td>
+                            <td class="text-center {{if gt .Run2.FixCount 0}}text-blue-400{{end}}">{{.Run2.FixCount}}</td>
+                            <td class="text-center">
+                                {{$diff := subtract .Run2.FixCount .Run1.FixCount}}
+                                {{if gt $diff 0}}<span class="text-blue-400">+{{$diff}}</span>
+                                {{else if lt $diff 0}}<span class="text-yellow-400">{{$diff}}</span>
+                                {{else}}<span class="text-dark-muted">-</span>{{end}}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Issues Comparison -->
+        <div class="grid grid-cols-2 gap-6">
+            <!-- Run 1 Issues -->
+            <div class="bg-dark-card dark:bg-dark-card bg-white rounded-lg border border-dark-border dark:border-dark-border border-gray-200 p-4">
+                <h3 class="text-lg font-semibold mb-4">Run #{{.Run1.ID}} Issues ({{len .Fixes1}})</h3>
+                {{if .Fixes1}}
+                <div class="space-y-3 max-h-96 overflow-y-auto">
+                    {{range .Fixes1}}
+                    <div class="bg-dark-bg dark:bg-dark-bg bg-gray-50 rounded p-3 text-sm">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-mono text-xs text-blue-400">{{.PodName}}</span>
+                            <span class="px-2 py-0.5 rounded text-xs
+                                {{if eq .Status "success"}}bg-green-500/20 text-green-400
+                                {{else if eq .Status "failed"}}bg-red-500/20 text-red-400
+                                {{else}}bg-yellow-500/20 text-yellow-400{{end}}">
+                                {{.Status}}
+                            </span>
+                        </div>
+                        <p class="text-dark-muted dark:text-dark-muted text-gray-500 text-xs mb-1">{{.ErrorType}}</p>
+                        {{if .Issue}}<p class="text-xs">{{.Issue}}</p>{{end}}
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <p class="text-dark-muted dark:text-dark-muted text-gray-500 text-sm">No issues found in this run.</p>
+                {{end}}
+            </div>
+
+            <!-- Run 2 Issues -->
+            <div class="bg-dark-card dark:bg-dark-card bg-white rounded-lg border border-dark-border dark:border-dark-border border-gray-200 p-4">
+                <h3 class="text-lg font-semibold mb-4">Run #{{.Run2.ID}} Issues ({{len .Fixes2}})</h3>
+                {{if .Fixes2}}
+                <div class="space-y-3 max-h-96 overflow-y-auto">
+                    {{range .Fixes2}}
+                    <div class="bg-dark-bg dark:bg-dark-bg bg-gray-50 rounded p-3 text-sm">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-mono text-xs text-blue-400">{{.PodName}}</span>
+                            <span class="px-2 py-0.5 rounded text-xs
+                                {{if eq .Status "success"}}bg-green-500/20 text-green-400
+                                {{else if eq .Status "failed"}}bg-red-500/20 text-red-400
+                                {{else}}bg-yellow-500/20 text-yellow-400{{end}}">
+                                {{.Status}}
+                            </span>
+                        </div>
+                        <p class="text-dark-muted dark:text-dark-muted text-gray-500 text-xs mb-1">{{.ErrorType}}</p>
+                        {{if .Issue}}<p class="text-xs">{{.Issue}}</p>{{end}}
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <p class="text-dark-muted dark:text-dark-muted text-gray-500 text-sm">No issues found in this run.</p>
+                {{end}}
+            </div>
+        </div>
+
+        {{else}}
+        <!-- No runs selected -->
+        <div class="flex flex-col items-center justify-center py-20 text-center">
+            <svg class="w-16 h-16 text-dark-muted dark:text-dark-muted text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+            </svg>
+            <h2 class="text-xl font-semibold mb-2">Select Two Runs to Compare</h2>
+            <p class="text-dark-muted dark:text-dark-muted text-gray-500 max-w-md">
+                Use the dropdowns above to select two runs from your history.
+                You can compare runs across different namespaces or time periods
+                to track issue resolution and monitor trends.
+            </p>
+        </div>
+        {{end}}
+    </main>
+
+    <script>
+        // Theme persistence
+        if (localStorage.getItem('theme') === 'light') {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+</body>
+</html>
