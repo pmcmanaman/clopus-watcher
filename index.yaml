@@ -3,7 +3,29 @@ entries:
   clopus-watcher:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-30T17:42:00.676150982Z"
+    created: "2025-12-30T18:40:49.95747333Z"
+    description: AI-powered Kubernetes pod watcher that monitors, detects issues,
+      and optionally applies hotfixes
+    digest: bae0d2deb018d38d610cf552c1eb77b5dc888f4cd198396c991300df68e97006
+    home: https://github.com/pmcmanaman/clopus-watcher
+    keywords:
+    - kubernetes
+    - monitoring
+    - ai
+    - claude
+    - pod-watcher
+    maintainers:
+    - name: pmcmanaman
+    name: clopus-watcher
+    sources:
+    - https://github.com/pmcmanaman/clopus-watcher
+    type: application
+    urls:
+    - https://pmcmanaman.github.io/clopus-watcher/clopus-watcher-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
+    appVersion: 1.0.0
+    created: "2025-12-30T18:40:49.956786188Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 3d7c57d4622c5d3ac216dab5b97b4b13ad5960ea4ae1851625e8f3455b4c61ea
@@ -23,4 +45,4 @@ entries:
     urls:
     - https://pmcmanaman.github.io/clopus-watcher/clopus-watcher-0.1.0.tgz
     version: 0.1.0
-generated: "2025-12-30T17:42:00.674551712Z"
+generated: "2025-12-30T18:40:49.955951222Z"
