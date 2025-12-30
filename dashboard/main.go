@@ -204,8 +204,10 @@ func refreshMetrics(database *db.DB) {
 	}
 
 	for _, ns := range namespaces {
+		nsName := ns.Namespace
+
 		// Get recent runs for this namespace
-		runs, err := database.GetRuns(ns, 100)
+		runs, err := database.GetRuns(nsName, 100)
 		if err != nil {
 			log.Printf("Error getting runs for metrics: %v", err)
 			continue
@@ -221,15 +223,15 @@ func refreshMetrics(database *db.DB) {
 		// Update last run timestamp
 		if latestRun.EndedAt != "" {
 			if t, err := time.Parse("2006-01-02 15:04:05", latestRun.EndedAt); err == nil {
-				metrics.LastRunTimestamp.WithLabelValues(ns).Set(float64(t.Unix()))
+				metrics.LastRunTimestamp.WithLabelValues(nsName).Set(float64(t.Unix()))
 			}
 		}
 
 		// Update pods monitored
-		metrics.PodsMonitored.WithLabelValues(ns).Set(float64(latestRun.PodCount))
+		metrics.PodsMonitored.WithLabelValues(nsName).Set(float64(latestRun.PodCount))
 
 		// Update active errors (from most recent run)
-		metrics.ActiveErrors.WithLabelValues(ns).Set(float64(latestRun.ErrorCount))
+		metrics.ActiveErrors.WithLabelValues(nsName).Set(float64(latestRun.ErrorCount))
 
 		// Process all runs for counters
 		for _, run := range runs {
@@ -242,14 +244,14 @@ func refreshMetrics(database *db.DB) {
 				}
 
 				// Only count if this run includes the current namespace
-				if rns == ns || run.Namespace == ns {
+				if rns == nsName || run.Namespace == nsName {
 					// Calculate run duration if both timestamps exist
 					if run.StartedAt != "" && run.EndedAt != "" {
 						start, err1 := time.Parse("2006-01-02 15:04:05", run.StartedAt)
 						end, err2 := time.Parse("2006-01-02 15:04:05", run.EndedAt)
 						if err1 == nil && err2 == nil {
 							duration := end.Sub(start).Seconds()
-							metrics.RunDuration.WithLabelValues(ns, run.Mode).Observe(duration)
+							metrics.RunDuration.WithLabelValues(nsName, run.Mode).Observe(duration)
 						}
 					}
 					break
