@@ -51,8 +51,10 @@ spec:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
               env:
-                - name: TARGET_NAMESPACE
-                  value: {{ .Values.watcher.targetNamespace | quote }}
+                - name: TARGET_NAMESPACES
+                  value: {{ .Values.watcher.targetNamespaces | join "," | quote }}
+                - name: EXCLUDE_NAMESPACES
+                  value: {{ .Values.watcher.excludeNamespaces | join "," | quote }}
                 - name: WATCHER_MODE
                   value: {{ .Values.watcher.mode | quote }}
                 - name: PROACTIVE_CHECKS

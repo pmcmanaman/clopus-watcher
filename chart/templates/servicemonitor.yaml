@@ -1,0 +1,30 @@
+{{- if and .Values.dashboard.enabled .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "clopus-watcher.fullname" . }}-dashboard
+  {{- if .Values.metrics.serviceMonitor.namespace }}
+  namespace: {{ .Values.metrics.serviceMonitor.namespace }}
+  {{- else }}
+  namespace: {{ include "clopus-watcher.namespace" . }}
+  {{- end }}
+  labels:
+    {{- include "clopus-watcher.dashboardLabels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "clopus-watcher.dashboardSelectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ include "clopus-watcher.namespace" . }}
+  endpoints:
+    - port: http
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      {{- if .Values.metrics.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      {{- end }}
+{{- end }}

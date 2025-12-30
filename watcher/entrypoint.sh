@@ -2,7 +2,6 @@
 set -e
 
 echo "=== Clopus Watcher Starting ==="
-echo "Target namespace: $TARGET_NAMESPACE"
 echo "SQLite path: $SQLITE_PATH"
 
 # === WATCHER MODE ===
@@ -12,6 +11,75 @@ echo "Watcher mode: $WATCHER_MODE"
 # === PROACTIVE CHECKS ===
 PROACTIVE_CHECKS="${PROACTIVE_CHECKS:-false}"
 echo "Proactive checks: $PROACTIVE_CHECKS"
+
+# === NAMESPACE RESOLUTION ===
+TARGET_NAMESPACES="${TARGET_NAMESPACES:-default}"
+EXCLUDE_NAMESPACES="${EXCLUDE_NAMESPACES:-kube-system,kube-public,kube-node-lease}"
+
+echo "Target namespace patterns: $TARGET_NAMESPACES"
+echo "Exclude namespace patterns: $EXCLUDE_NAMESPACES"
+
+# Get all cluster namespaces
+ALL_NAMESPACES=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
+
+# Function to match namespace against pattern (supports * wildcard)
+matches_pattern() {
+    local ns="$1"
+    local pattern="$2"
+    # Convert glob pattern to regex: * becomes .*
+    local regex="^$(echo "$pattern" | sed 's/\*/.*/')$"
+    [[ "$ns" =~ $regex ]]
+}
+
+# Resolve target namespaces (expand wildcards)
+RESOLVED_NAMESPACES=""
+IFS=',' read -ra TARGET_PATTERNS <<< "$TARGET_NAMESPACES"
+for pattern in "${TARGET_PATTERNS[@]}"; do
+    pattern=$(echo "$pattern" | xargs)  # trim whitespace
+    for ns in $ALL_NAMESPACES; do
+        if matches_pattern "$ns" "$pattern"; then
+            if [ -z "$RESOLVED_NAMESPACES" ]; then
+                RESOLVED_NAMESPACES="$ns"
+            else
+                # Only add if not already in list
+                if ! echo ",$RESOLVED_NAMESPACES," | grep -q ",$ns,"; then
+                    RESOLVED_NAMESPACES="$RESOLVED_NAMESPACES,$ns"
+                fi
+            fi
+        fi
+    done
+done
+
+# Apply exclusions
+IFS=',' read -ra EXCLUDE_PATTERNS <<< "$EXCLUDE_NAMESPACES"
+FINAL_NAMESPACES=""
+IFS=',' read -ra RESOLVED_LIST <<< "$RESOLVED_NAMESPACES"
+for ns in "${RESOLVED_LIST[@]}"; do
+    excluded=false
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        pattern=$(echo "$pattern" | xargs)  # trim whitespace
+        if matches_pattern "$ns" "$pattern"; then
+            excluded=true
+            break
+        fi
+    done
+    if [ "$excluded" = false ]; then
+        if [ -z "$FINAL_NAMESPACES" ]; then
+            FINAL_NAMESPACES="$ns"
+        else
+            FINAL_NAMESPACES="$FINAL_NAMESPACES,$ns"
+        fi
+    fi
+done
+
+# Fallback to default if no namespaces resolved
+if [ -z "$FINAL_NAMESPACES" ]; then
+    echo "WARNING: No namespaces matched patterns, falling back to 'default'"
+    FINAL_NAMESPACES="default"
+fi
+
+echo "Resolved namespaces: $FINAL_NAMESPACES"
+NAMESPACE_COUNT=$(echo "$FINAL_NAMESPACES" | tr ',' '\n' | wc -l | xargs)
 
 # === AUTHENTICATION SETUP ===
 AUTH_MODE="${AUTH_MODE:-api-key}"
@@ -74,11 +142,12 @@ sqlite3 "$SQLITE_PATH" "ALTER TABLE fixes ADD COLUMN run_id INTEGER;" 2>/dev/nul
 echo "Database initialized"
 
 # === CREATE RUN RECORD ===
-RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$TARGET_NAMESPACE', '$WATCHER_MODE', 'running'); SELECT last_insert_rowid();")
+RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$FINAL_NAMESPACES', '$WATCHER_MODE', 'running'); SELECT last_insert_rowid();")
 echo "Created run #$RUN_ID"
 
 # === GET LAST RUN TIME ===
-LAST_RUN_TIME=$(sqlite3 "$SQLITE_PATH" "SELECT COALESCE(MAX(ended_at), '') FROM runs WHERE namespace = '$TARGET_NAMESPACE' AND status != 'running' AND id != $RUN_ID;")
+# Get last run time across any of the target namespaces
+LAST_RUN_TIME=$(sqlite3 "$SQLITE_PATH" "SELECT COALESCE(MAX(ended_at), '') FROM runs WHERE status != 'running' AND id != $RUN_ID;")
 echo "Last run time: ${LAST_RUN_TIME:-'(first run)'}"
 
 # === SELECT PROMPT ===
@@ -108,7 +177,7 @@ $(cat "$PROACTIVE_FILE")"
 fi
 
 # Replace environment variables in prompt
-PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACE|$TARGET_NAMESPACE|g")
+PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACES|$FINAL_NAMESPACES|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$SQLITE_PATH|$SQLITE_PATH|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$RUN_ID|$RUN_ID|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$LAST_RUN_TIME|$LAST_RUN_TIME|g")
@@ -118,7 +187,7 @@ echo "Starting Claude Code..."
 
 LOG_FILE="/data/watcher.log"
 echo "=== Run #$RUN_ID started at $(date -Iseconds) ===" > "$LOG_FILE"
-echo "Mode: $WATCHER_MODE | Namespace: $TARGET_NAMESPACE" >> "$LOG_FILE"
+echo "Mode: $WATCHER_MODE | Namespaces: $FINAL_NAMESPACES" >> "$LOG_FILE"
 echo "----------------------------------------" >> "$LOG_FILE"
 
 # Capture output
