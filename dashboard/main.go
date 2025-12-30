@@ -14,6 +14,38 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// loggingMiddleware logs HTTP requests with method, path, status, and duration
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Wrap response writer to capture status code
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next.ServeHTTP(lrw, r)
+
+		duration := time.Since(start)
+
+		// Skip logging for health checks and metrics to reduce noise
+		if r.URL.Path == "/health" || r.URL.Path == "/metrics" {
+			return
+		}
+
+		log.Printf("%s %s %d %v", r.Method, r.URL.Path, lrw.statusCode, duration)
+	})
+}
+
+// loggingResponseWriter wraps http.ResponseWriter to capture status code
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
 func main() {
 	sqlitePath := os.Getenv("SQLITE_PATH")
 	if sqlitePath == "" {
@@ -65,29 +97,35 @@ func main() {
 	// Start metrics updater goroutine
 	go updateMetrics(database)
 
+	// Create a new mux for routing
+	mux := http.NewServeMux()
+
 	// Page routes
-	http.HandleFunc("/", h.Index)
+	mux.HandleFunc("/", h.Index)
 
 	// HTMX partial routes
-	http.HandleFunc("/partials/runs", h.RunsList)
-	http.HandleFunc("/partials/run", h.RunDetail)
-	http.HandleFunc("/partials/stats", h.Stats)
-	http.HandleFunc("/partials/log", h.LiveLog)
+	mux.HandleFunc("/partials/runs", h.RunsList)
+	mux.HandleFunc("/partials/run", h.RunDetail)
+	mux.HandleFunc("/partials/stats", h.Stats)
+	mux.HandleFunc("/partials/log", h.LiveLog)
 
 	// API routes
-	http.HandleFunc("/api/namespaces", h.APINamespaces)
-	http.HandleFunc("/api/runs", h.APIRuns)
-	http.HandleFunc("/api/run", h.APIRun)
+	mux.HandleFunc("/api/namespaces", h.APINamespaces)
+	mux.HandleFunc("/api/runs", h.APIRuns)
+	mux.HandleFunc("/api/run", h.APIRun)
 
 	// Prometheus metrics endpoint
-	http.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Health check
-	http.HandleFunc("/health", h.Health)
+	mux.HandleFunc("/health", h.Health)
+
+	// Apply logging middleware
+	handler := loggingMiddleware(mux)
 
 	log.Printf("Dashboard starting on port %s", port)
 	log.Printf("Metrics available at /metrics")
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
 
 // updateMetrics periodically updates Prometheus metrics from the database
