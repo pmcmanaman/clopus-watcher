@@ -9,17 +9,18 @@ import (
 )
 
 type Run struct {
-	ID         int
-	StartedAt  string
-	EndedAt    string
-	Namespace  string
-	Mode       string
-	Status     string // ok, fixed, failed, running
-	PodCount   int
-	ErrorCount int
-	FixCount   int
-	Report     string
-	Log        string
+	ID              int
+	StartedAt       string
+	EndedAt         string
+	Namespace       string
+	Mode            string
+	Status          string // ok, fixed, failed, running
+	PodCount        int
+	ErrorCount      int
+	FixCount        int
+	Report          string
+	Log             string
+	ProactiveChecks bool
 }
 
 type Fix struct {
@@ -94,6 +95,9 @@ func New(path string) (*DB, error) {
 	// Add run_id column if it doesn't exist (migration for existing DBs)
 	conn.Exec(`ALTER TABLE fixes ADD COLUMN run_id INTEGER`)
 
+	// Add proactive_checks column if it doesn't exist (migration for existing DBs)
+	conn.Exec(`ALTER TABLE runs ADD COLUMN proactive_checks INTEGER DEFAULT 0`)
+
 	// Create indices for better query performance
 	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_namespace ON runs(namespace)`)
 	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`)
@@ -147,7 +151,8 @@ func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
 func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, search string) ([]Run, error) {
 	query := `
 		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
-		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, '')
+		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, ''),
+		       COALESCE(proactive_checks, 0)
 		FROM runs
 		WHERE 1=1
 	`
@@ -155,8 +160,8 @@ func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, sear
 
 	if namespace != "" {
 		// Match namespace in comma-separated list: exact match, at start, at end, or in middle
-		query += " AND (namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%')"
-		args = append(args, namespace, namespace, namespace, namespace)
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
 	}
 
 	if status != "" {
@@ -187,7 +192,7 @@ func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, sear
 	for rows.Next() {
 		var r Run
 		err := rows.Scan(&r.ID, &r.StartedAt, &r.EndedAt, &r.Namespace, &r.Mode,
-			&r.Status, &r.PodCount, &r.ErrorCount, &r.FixCount, &r.Report, &r.Log)
+			&r.Status, &r.PodCount, &r.ErrorCount, &r.FixCount, &r.Report, &r.Log, &r.ProactiveChecks)
 		if err != nil {
 			return nil, err
 		}
@@ -204,8 +209,8 @@ func (db *DB) CountRuns(namespace, status, search string) (int, error) {
 
 	if namespace != "" {
 		// Match namespace in comma-separated list: exact match, at start, at end, or in middle
-		query += " AND (namespace = ? OR namespace LIKE ? || ',%' OR namespace LIKE '%,' || ? OR namespace LIKE '%,' || ? || ',%')"
-		args = append(args, namespace, namespace, namespace, namespace)
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
 	}
 
 	if status != "" {
@@ -232,10 +237,11 @@ func (db *DB) GetRun(id int) (*Run, error) {
 	var r Run
 	err := db.conn.QueryRow(`
 		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
-		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, '')
+		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, ''),
+		       COALESCE(proactive_checks, 0)
 		FROM runs WHERE id = ?
 	`, id).Scan(&r.ID, &r.StartedAt, &r.EndedAt, &r.Namespace, &r.Mode,
-		&r.Status, &r.PodCount, &r.ErrorCount, &r.FixCount, &r.Report, &r.Log)
+		&r.Status, &r.PodCount, &r.ErrorCount, &r.FixCount, &r.Report, &r.Log, &r.ProactiveChecks)
 	if err != nil {
 		return nil, err
 	}
@@ -299,9 +305,7 @@ func (db *DB) GetNamespaceStats(namespace string) (*NamespaceStats, error) {
 	var s NamespaceStats
 	s.Namespace = namespace
 
-	// Use pattern matching to find runs containing this namespace
-	pattern := "%" + namespace + "%"
-
+	// Match namespace in comma-separated list: exact match, at start, at end, or in middle
 	// Single query to get all stats at once
 	err := db.conn.QueryRow(`
 		SELECT
@@ -310,8 +314,8 @@ func (db *DB) GetNamespaceStats(namespace string) (*NamespaceStats, error) {
 			SUM(CASE WHEN status = 'fixed' THEN 1 ELSE 0 END) as fixed_count,
 			SUM(CASE WHEN status = 'failed' OR status = 'issues_found' THEN 1 ELSE 0 END) as failed_count
 		FROM runs
-		WHERE namespace = ? OR namespace LIKE ?
-	`, namespace, pattern).Scan(&s.RunCount, &s.OkCount, &s.FixedCount, &s.FailedCount)
+		WHERE namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?
+	`, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%").Scan(&s.RunCount, &s.OkCount, &s.FixedCount, &s.FailedCount)
 
 	if err != nil {
 		return nil, err
@@ -411,6 +415,26 @@ func (db *DB) GetStats() (total, success, failed, pending int, err error) {
 	}
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM fixes WHERE status = 'pending' OR status = 'analyzing'").Scan(&pending)
 	return
+}
+
+// ResetDatabase deletes all runs and fixes from the database
+func (db *DB) ResetDatabase() error {
+	// Delete all fixes first (foreign key)
+	_, err := db.conn.Exec(`DELETE FROM fixes`)
+	if err != nil {
+		return err
+	}
+
+	// Delete all runs
+	_, err = db.conn.Exec(`DELETE FROM runs`)
+	if err != nil {
+		return err
+	}
+
+	// Reclaim space
+	db.conn.Exec(`VACUUM`)
+
+	return nil
 }
 
 // CleanupOldRuns deletes runs and their associated fixes older than the specified number of days
