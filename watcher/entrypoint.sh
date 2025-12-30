@@ -242,21 +242,45 @@ FIX_COUNT=0
 STATUS="ok"
 
 if [ -n "$REPORT" ]; then
-    # Parse pod_count
-    PARSED=$(echo "$REPORT" | grep -o '"pod_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && POD_COUNT=$PARSED
+    # Validate JSON structure first
+    if command -v jq >/dev/null 2>&1; then
+        # Use jq for robust JSON parsing
+        if echo "$REPORT" | jq empty 2>/dev/null; then
+            echo "Report JSON is valid, parsing with jq"
+            PARSED=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && POD_COUNT=$PARSED
 
-    # Parse error_count
-    PARSED=$(echo "$REPORT" | grep -o '"error_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && ERROR_COUNT=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.error_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && ERROR_COUNT=$PARSED
 
-    # Parse fix_count
-    PARSED=$(echo "$REPORT" | grep -o '"fix_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && FIX_COUNT=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && FIX_COUNT=$PARSED
 
-    # Parse status
-    PARSED=$(echo "$REPORT" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
-    [ -n "$PARSED" ] && STATUS=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.status // "ok"' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && STATUS=$PARSED
+        else
+            echo "WARNING: Report JSON is invalid, skipping parse"
+        fi
+    else
+        # Fallback to grep/sed parsing (less robust)
+        echo "jq not available, using grep/sed fallback"
+
+        # Parse pod_count
+        PARSED=$(echo "$REPORT" | grep -o '"pod_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && POD_COUNT=$PARSED
+
+        # Parse error_count
+        PARSED=$(echo "$REPORT" | grep -o '"error_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && ERROR_COUNT=$PARSED
+
+        # Parse fix_count
+        PARSED=$(echo "$REPORT" | grep -o '"fix_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && FIX_COUNT=$PARSED
+
+        # Parse status
+        PARSED=$(echo "$REPORT" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+        [ -n "$PARSED" ] && STATUS=$PARSED
+    fi
 fi
 
 # Validate status is one of expected values

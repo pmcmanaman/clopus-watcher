@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     sqlite3 \
+    jq \
     ca-certificates \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
