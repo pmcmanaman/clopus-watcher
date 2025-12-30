@@ -207,16 +207,25 @@ if [ "$AUTH_MODE" = "credentials" ]; then
         cp /secrets/credentials.json "$HOME/.claude/.credentials.json"
     else
         echo "ERROR: AUTH_MODE=credentials but no credentials.json found"
+        echo "  Checked locations:"
+        echo "    - $HOME/.claude/.credentials.json"
+        echo "    - /secrets/credentials.json"
+        echo "  Tip: Mount credentials.json via a Secret volume"
         exit 1
     fi
 elif [ "$AUTH_MODE" = "api-key" ]; then
     if [ -z "$ANTHROPIC_API_KEY" ]; then
         echo "ERROR: AUTH_MODE=api-key but ANTHROPIC_API_KEY not set"
+        echo "  Tip: Set ANTHROPIC_API_KEY environment variable via Secret"
+        echo "  Example: kubectl create secret generic anthropic-api-key --from-literal=ANTHROPIC_API_KEY=sk-..."
         exit 1
     fi
     echo "Using API key authentication"
 else
     echo "ERROR: Invalid AUTH_MODE: $AUTH_MODE (use 'api-key' or 'credentials')"
+    echo "  Valid options:"
+    echo "    - api-key: Use ANTHROPIC_API_KEY environment variable"
+    echo "    - credentials: Use mounted credentials.json file"
     exit 1
 fi
 

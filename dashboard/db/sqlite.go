@@ -293,6 +293,22 @@ func (db *DB) GetNamespaceStats(namespace string) (*NamespaceStats, error) {
 	return &s, nil
 }
 
+// GetAllNamespacesStats returns aggregated stats across all namespaces
+func (db *DB) GetAllNamespacesStats() (*NamespaceStats, error) {
+	var s NamespaceStats
+	s.Namespace = "All Namespaces"
+
+	err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&s.RunCount)
+	if err != nil {
+		return nil, err
+	}
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'ok'`).Scan(&s.OkCount)
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'fixed'`).Scan(&s.FixedCount)
+	db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'failed' OR status = 'issues_found'`).Scan(&s.FailedCount)
+
+	return &s, nil
+}
+
 // Fix operations
 
 func (db *DB) GetFixes(limit int) ([]Fix, error) {
