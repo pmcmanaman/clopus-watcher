@@ -3,12 +3,20 @@ package handlers
 import (
 	"encoding/json"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
+)
+
+// Validation patterns
+var (
+	// Namespace must be valid k8s namespace name (alphanumeric, dashes, commas for multi-ns)
+	namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9,]*[a-z0-9])?$`)
 )
 
 type Handler struct {
@@ -23,6 +31,33 @@ func New(database *db.DB, tmpl *template.Template, logPath string) *Handler {
 		tmpl:    tmpl,
 		logPath: logPath,
 	}
+}
+
+// validateRunID validates and parses a run ID from string
+func validateRunID(idStr string) (int, error) {
+	if idStr == "" {
+		return 0, nil // empty is valid (means no selection)
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, err
+	}
+	if id < 0 {
+		return 0, strconv.ErrRange
+	}
+	return id, nil
+}
+
+// validateNamespace validates a namespace string
+func validateNamespace(ns string) bool {
+	if ns == "" {
+		return true // empty is valid (means all)
+	}
+	// Allow longer multi-namespace strings
+	if len(ns) > 253 {
+		return false
+	}
+	return namespacePattern.MatchString(ns)
 }
 
 // ReportJSON represents the parsed report structure
@@ -130,34 +165,68 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
 	runIDStr := r.URL.Query().Get("run")
 
-	namespaces, _ := h.db.GetNamespaces()
+	// Validate inputs
+	if !validateNamespace(namespace) {
+		log.Printf("Invalid namespace parameter: %s", namespace)
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	runID, err := validateRunID(runIDStr)
+	if err != nil {
+		log.Printf("Invalid run ID parameter: %s", runIDStr)
+		http.Error(w, "Invalid run ID parameter", http.StatusBadRequest)
+		return
+	}
+
+	namespaces, err := h.db.GetNamespaces()
+	if err != nil {
+		log.Printf("Error getting namespaces: %v", err)
+		// Continue with empty list rather than error
+		namespaces = []db.NamespaceStats{}
+	}
 
 	// If no namespace selected and we have namespaces, select first
 	if namespace == "" && len(namespaces) > 0 {
 		namespace = namespaces[0].Namespace
 	}
 
-	runs, _ := h.db.GetRuns(namespace, 50)
+	runs, err := h.db.GetRuns(namespace, 50)
+	if err != nil {
+		log.Printf("Error getting runs for namespace %s: %v", namespace, err)
+		runs = []db.Run{}
+	}
 
 	var selectedRun *db.Run
 	var selectedFixes []FixWithRecommendation
 	var reportSummary string
 
 	// If run specified, get it; otherwise get latest
-	if runIDStr != "" {
-		runID, _ := strconv.Atoi(runIDStr)
-		selectedRun, _ = h.db.GetRun(runID)
+	if runID > 0 {
+		selectedRun, err = h.db.GetRun(runID)
+		if err != nil {
+			log.Printf("Error getting run %d: %v", runID, err)
+		}
 		if selectedRun != nil {
-			fixes, _ := h.db.GetFixesByRun(runID)
+			fixes, err := h.db.GetFixesByRun(runID)
+			if err != nil {
+				log.Printf("Error getting fixes for run %d: %v", runID, err)
+			}
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
 			}
 		}
 	} else if len(runs) > 0 {
-		selectedRun, _ = h.db.GetRun(runs[0].ID)
+		selectedRun, err = h.db.GetRun(runs[0].ID)
+		if err != nil {
+			log.Printf("Error getting run %d: %v", runs[0].ID, err)
+		}
 		if selectedRun != nil {
-			fixes, _ := h.db.GetFixesByRun(runs[0].ID)
+			fixes, err := h.db.GetFixesByRun(runs[0].ID)
+			if err != nil {
+				log.Printf("Error getting fixes for run %d: %v", runs[0].ID, err)
+			}
 			selectedFixes = enrichFixesWithRecommendations(fixes, selectedRun.Report)
 			if parsed, _ := parseReportJSON(selectedRun.Report); parsed != nil {
 				reportSummary = parsed.Summary
@@ -167,7 +236,10 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 
 	var stats *db.NamespaceStats
 	if namespace != "" {
-		stats, _ = h.db.GetNamespaceStats(namespace)
+		stats, err = h.db.GetNamespaceStats(namespace)
+		if err != nil {
+			log.Printf("Error getting stats for namespace %s: %v", namespace, err)
+		}
 	}
 
 	data := PageData{
@@ -181,40 +253,62 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		ReportSummary: reportSummary,
 	}
 
-	err := h.tmpl.ExecuteTemplate(w, "index.html", data)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
+		log.Printf("Error executing template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
 // HTMX partials
 func (h *Handler) RunsList(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
-	runs, _ := h.db.GetRuns(namespace, 50)
+
+	if !validateNamespace(namespace) {
+		log.Printf("Invalid namespace parameter in RunsList: %s", namespace)
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	runs, err := h.db.GetRuns(namespace, 50)
+	if err != nil {
+		log.Printf("Error getting runs for namespace %s: %v", namespace, err)
+		http.Error(w, "Error retrieving runs", http.StatusInternalServerError)
+		return
+	}
 
 	data := struct {
 		Runs      []db.Run
 		CurrentNS string
 	}{runs, namespace}
 
-	h.tmpl.ExecuteTemplate(w, "runs-list.html", data)
+	if err := h.tmpl.ExecuteTemplate(w, "runs-list.html", data); err != nil {
+		log.Printf("Error executing runs-list template: %v", err)
+	}
 }
 
 func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 	runIDStr := r.URL.Query().Get("id")
-	if runIDStr == "" {
-		http.Error(w, "Missing run id", http.StatusBadRequest)
+
+	runID, err := validateRunID(runIDStr)
+	if err != nil || runID <= 0 {
+		log.Printf("Invalid run ID parameter in RunDetail: %s", runIDStr)
+		http.Error(w, "Invalid run ID", http.StatusBadRequest)
 		return
 	}
 
-	runID, _ := strconv.Atoi(runIDStr)
 	run, err := h.db.GetRun(runID)
 	if err != nil {
+		log.Printf("Error getting run %d: %v", runID, err)
 		http.Error(w, "Run not found", http.StatusNotFound)
 		return
 	}
 
-	fixes, _ := h.db.GetFixesByRun(runID)
+	fixes, err := h.db.GetFixesByRun(runID)
+	if err != nil {
+		log.Printf("Error getting fixes for run %d: %v", runID, err)
+		// Continue with empty fixes rather than failing
+		fixes = []db.Fix{}
+	}
 	enrichedFixes := enrichFixesWithRecommendations(fixes, run.Report)
 
 	var reportSummary string
@@ -228,13 +322,30 @@ func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 		ReportSummary string
 	}{run, enrichedFixes, reportSummary}
 
-	h.tmpl.ExecuteTemplate(w, "run-detail.html", data)
+	if err := h.tmpl.ExecuteTemplate(w, "run-detail.html", data); err != nil {
+		log.Printf("Error executing run-detail template: %v", err)
+	}
 }
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
-	stats, _ := h.db.GetNamespaceStats(namespace)
-	h.tmpl.ExecuteTemplate(w, "stats.html", stats)
+
+	if !validateNamespace(namespace) {
+		log.Printf("Invalid namespace parameter in Stats: %s", namespace)
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	stats, err := h.db.GetNamespaceStats(namespace)
+	if err != nil {
+		log.Printf("Error getting stats for namespace %s: %v", namespace, err)
+		http.Error(w, "Error retrieving stats", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.tmpl.ExecuteTemplate(w, "stats.html", stats); err != nil {
+		log.Printf("Error executing stats template: %v", err)
+	}
 }
 
 func (h *Handler) LiveLog(w http.ResponseWriter, r *http.Request) {
@@ -258,26 +369,47 @@ func (h *Handler) APINamespaces(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) APIRuns(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
+
+	if !validateNamespace(namespace) {
+		log.Printf("Invalid namespace parameter in APIRuns: %s", namespace)
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
 	runs, err := h.db.GetRuns(namespace, 100)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Error getting runs for namespace %s: %v", namespace, err)
+		http.Error(w, "Error retrieving runs", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(runs)
+	if err := json.NewEncoder(w).Encode(runs); err != nil {
+		log.Printf("Error encoding runs JSON: %v", err)
+	}
 }
 
 func (h *Handler) APIRun(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
-	id, _ := strconv.Atoi(idStr)
 
-	run, err := h.db.GetRun(id)
-	if err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
+	id, err := validateRunID(idStr)
+	if err != nil || id <= 0 {
+		log.Printf("Invalid run ID parameter in APIRun: %s", idStr)
+		http.Error(w, "Invalid run ID", http.StatusBadRequest)
 		return
 	}
 
-	fixes, _ := h.db.GetFixesByRun(id)
+	run, err := h.db.GetRun(id)
+	if err != nil {
+		log.Printf("Error getting run %d: %v", id, err)
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	fixes, err := h.db.GetFixesByRun(id)
+	if err != nil {
+		log.Printf("Error getting fixes for run %d: %v", id, err)
+		fixes = []db.Fix{}
+	}
 	enrichedFixes := enrichFixesWithRecommendations(fixes, run.Report)
 
 	result := struct {
@@ -286,7 +418,9 @@ func (h *Handler) APIRun(w http.ResponseWriter, r *http.Request) {
 	}{run, enrichedFixes}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("Error encoding run JSON: %v", err)
+	}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
