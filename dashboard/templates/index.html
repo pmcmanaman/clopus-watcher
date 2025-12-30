@@ -229,7 +229,7 @@
                     <div class="relative">
                         <select id="ns-select"
                                 class="appearance-none bg-surface-800/80 border border-white/10 rounded-lg px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all cursor-pointer"
-                                onchange="window.location.href='/?ns=' + this.value">
+                                onchange="changeNamespace(this.value)">
                             {{if not .Namespaces}}
                             <option value="">No namespaces</option>
                             {{else}}
@@ -626,6 +626,15 @@
         function toggleTriggerMenu() {
             const menu = document.getElementById('trigger-menu');
             menu.classList.toggle('hidden');
+        }
+
+        // Change namespace while preserving current run
+        function changeNamespace(ns) {
+            const url = new URL(window.location);
+            url.searchParams.set('ns', ns);
+            // Keep the run parameter if it exists
+            // The server will validate if the run is still valid for the new namespace
+            window.location.href = url.toString();
         }
 
         // Delete a specific run
