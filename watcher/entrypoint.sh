@@ -4,8 +4,33 @@ set -e
 echo "=== Clopus Watcher Starting ==="
 echo "SQLite path: $SQLITE_PATH"
 
+# === SQL SAFETY FUNCTIONS ===
+# Escape single quotes for SQL strings (prevents SQL injection)
+sql_escape() {
+    echo "$1" | sed "s/'/''/g"
+}
+
+# Validate numeric value (prevents SQL injection in numeric fields)
+validate_numeric() {
+    local value="$1"
+    local default="${2:-0}"
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "$value"
+    else
+        echo "$default"
+    fi
+}
+
 # === WATCHER MODE ===
 WATCHER_MODE="${WATCHER_MODE:-autonomous}"
+# Validate watcher mode
+case "$WATCHER_MODE" in
+    autonomous|report) ;;
+    *)
+        echo "ERROR: Invalid WATCHER_MODE: $WATCHER_MODE (use 'autonomous' or 'report')"
+        exit 1
+        ;;
+esac
 echo "Watcher mode: $WATCHER_MODE"
 
 # === PROACTIVE CHECKS ===
@@ -142,7 +167,14 @@ sqlite3 "$SQLITE_PATH" "ALTER TABLE fixes ADD COLUMN run_id INTEGER;" 2>/dev/nul
 echo "Database initialized"
 
 # === CREATE RUN RECORD ===
-RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$FINAL_NAMESPACES', '$WATCHER_MODE', 'running'); SELECT last_insert_rowid();")
+ESCAPED_NAMESPACES=$(sql_escape "$FINAL_NAMESPACES")
+ESCAPED_MODE=$(sql_escape "$WATCHER_MODE")
+RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$ESCAPED_NAMESPACES', '$ESCAPED_MODE', 'running'); SELECT last_insert_rowid();")
+RUN_ID=$(validate_numeric "$RUN_ID" "0")
+if [ "$RUN_ID" = "0" ]; then
+    echo "ERROR: Failed to create run record"
+    exit 1
+fi
 echo "Created run #$RUN_ID"
 
 # === GET LAST RUN TIME ===
@@ -159,7 +191,7 @@ fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
     echo "ERROR: Prompt file not found: $PROMPT_FILE"
-    sqlite3 "$SQLITE_PATH" "UPDATE runs SET ended_at = datetime('now'), status = 'failed', report = 'Prompt file not found' WHERE id = $RUN_ID;"
+    sqlite3 "$SQLITE_PATH" "UPDATE runs SET ended_at = datetime('now'), status = 'failed', report = 'Prompt file not found' WHERE id = $(validate_numeric $RUN_ID);"
     exit 1
 fi
 
@@ -233,24 +265,33 @@ case "$STATUS" in
     *) STATUS="ok" ;;
 esac
 
+# Validate parsed numeric values
+POD_COUNT=$(validate_numeric "$POD_COUNT" "0")
+ERROR_COUNT=$(validate_numeric "$ERROR_COUNT" "0")
+FIX_COUNT=$(validate_numeric "$FIX_COUNT" "0")
+
 echo "Final values: pods=$POD_COUNT errors=$ERROR_COUNT fixes=$FIX_COUNT status=$STATUS"
 
-# Read full log (limit size to prevent issues)
-FULL_LOG=$(head -c 100000 "$LOG_FILE" | sed "s/'/''/g")
+# Read full log (limit size to prevent issues) and escape for SQL
+FULL_LOG=$(head -c 100000 "$LOG_FILE")
+FULL_LOG_ESCAPED=$(sql_escape "$FULL_LOG")
 
 # Escape report for SQL
-REPORT_ESCAPED=$(echo "$REPORT" | sed "s/'/''/g")
+REPORT_ESCAPED=$(sql_escape "$REPORT")
+
+# Escape status for SQL
+STATUS_ESCAPED=$(sql_escape "$STATUS")
 
 # === UPDATE RUN RECORD ===
 sqlite3 "$SQLITE_PATH" "UPDATE runs SET
     ended_at = datetime('now'),
-    status = '$STATUS',
+    status = '$STATUS_ESCAPED',
     pod_count = $POD_COUNT,
     error_count = $ERROR_COUNT,
     fix_count = $FIX_COUNT,
     report = '$REPORT_ESCAPED',
-    log = '$FULL_LOG'
-WHERE id = $RUN_ID;"
+    log = '$FULL_LOG_ESCAPED'
+WHERE id = $(validate_numeric $RUN_ID);"
 
 echo "Run #$RUN_ID completed with status: $STATUS"
 
