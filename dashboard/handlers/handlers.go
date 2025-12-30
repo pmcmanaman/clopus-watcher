@@ -16,6 +16,7 @@ import (
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -1029,6 +1030,28 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	jobName := fmt.Sprintf("%s-manual-%d", cronjobName, timestamp)
 
 	// Create Job from CronJob spec
+	jobSpec := cronJob.Spec.JobTemplate.Spec.DeepCopy()
+
+	// Override MODE environment variable in the container
+	for i := range jobSpec.Template.Spec.Containers {
+		container := &jobSpec.Template.Spec.Containers[i]
+		modeFound := false
+		for j := range container.Env {
+			if container.Env[j].Name == "MODE" {
+				container.Env[j].Value = mode
+				modeFound = true
+				break
+			}
+		}
+		// If MODE env var doesn't exist, add it
+		if !modeFound {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  "MODE",
+				Value: mode,
+			})
+		}
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -1042,7 +1065,7 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 				"cronjob.kubernetes.io/instantiate": "manual",
 			},
 		},
-		Spec: cronJob.Spec.JobTemplate.Spec,
+		Spec: *jobSpec,
 	}
 
 	// Create the job
