@@ -8,6 +8,10 @@ metadata:
     {{- include "clopus-watcher.dashboardLabels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.dashboard.replicas }}
+  {{- if .Values.persistence.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "clopus-watcher.dashboardSelectorLabels" . | nindent 6 }}

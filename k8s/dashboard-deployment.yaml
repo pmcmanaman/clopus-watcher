@@ -5,6 +5,8 @@ metadata:
   namespace: clopus-watcher
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: dashboard
