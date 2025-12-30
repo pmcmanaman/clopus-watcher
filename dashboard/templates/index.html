@@ -298,7 +298,7 @@
         <main class="flex-1 flex flex-col min-w-0 bg-surface-950">
             {{if .SelectedRun}}
             <div id="run-detail" class="flex-1 overflow-y-auto scrollbar-thin">
-                {{template "run-detail.html" (dict "Run" .SelectedRun "Fixes" .SelectedFixes "Stats" .Stats)}}
+                {{template "run-detail.html" (dict "Run" .SelectedRun "Fixes" .SelectedFixes "Stats" .Stats "ReportSummary" .ReportSummary)}}
             </div>
             {{else}}
             <!-- Empty State -->

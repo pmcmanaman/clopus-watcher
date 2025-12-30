@@ -200,32 +200,58 @@
                             <div class="text-xs text-slate-500 font-mono">{{$fix.Timestamp}}</div>
                         </div>
                     </div>
-                    {{if eq $fix.Status "success"}}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-xs rounded-lg font-medium border border-emerald-500/20">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                        </svg>
-                        Fixed
-                    </span>
-                    {{else if eq $fix.Status "failed"}}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-500/10 text-red-400 text-xs rounded-lg font-medium border border-red-500/20">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                        </svg>
-                        Failed
-                    </span>
-                    {{else if eq $fix.Status "reported"}}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-400 text-xs rounded-lg font-medium border border-blue-500/20">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                        </svg>
-                        Reported
-                    </span>
-                    {{else}}
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 text-xs rounded-lg font-medium border border-slate-500/20">
-                        {{$fix.Status}}
-                    </span>
-                    {{end}}
+                    <div class="flex items-center gap-2">
+                        <!-- Severity badge -->
+                        {{if eq $fix.Severity "critical"}}
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded font-medium border border-red-500/20">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                            </svg>
+                            Critical
+                        </span>
+                        {{else if eq $fix.Severity "warning"}}
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 text-amber-400 text-xs rounded font-medium border border-amber-500/20">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                            </svg>
+                            Warning
+                        </span>
+                        {{else if eq $fix.Severity "info"}}
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 text-blue-400 text-xs rounded font-medium border border-blue-500/20">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                            </svg>
+                            Info
+                        </span>
+                        {{end}}
+                        <!-- Status badge -->
+                        {{if eq $fix.Status "success"}}
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-xs rounded-lg font-medium border border-emerald-500/20">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Fixed
+                        </span>
+                        {{else if eq $fix.Status "failed"}}
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-500/10 text-red-400 text-xs rounded-lg font-medium border border-red-500/20">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                            Failed
+                        </span>
+                        {{else if eq $fix.Status "reported"}}
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-400 text-xs rounded-lg font-medium border border-blue-500/20">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Reported
+                        </span>
+                        {{else}}
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 text-xs rounded-lg font-medium border border-slate-500/20">
+                            {{$fix.Status}}
+                        </span>
+                        {{end}}
+                    </div>
                 </div>
 
                 <!-- Error info -->
@@ -234,13 +260,28 @@
                         <span class="text-xs font-medium text-red-400 uppercase tracking-wider">Error</span>
                         <span class="px-2 py-0.5 bg-red-500/10 text-red-300 text-xs rounded font-mono">{{$fix.ErrorType}}</span>
                     </div>
-                    {{if $fix.ErrorMessage}}
+                    {{if $fix.Issue}}
+                    <p class="text-sm text-slate-300 leading-relaxed">{{$fix.Issue}}</p>
+                    {{else if $fix.ErrorMessage}}
                     <p class="text-sm text-slate-400 leading-relaxed">{{$fix.ErrorMessage}}</p>
                     {{end}}
                 </div>
 
-                <!-- Fix applied -->
-                {{if $fix.FixApplied}}
+                <!-- Recommendation (for report mode) -->
+                {{if $fix.Recommendation}}
+                <div class="pt-3 border-t border-white/5">
+                    <div class="flex items-start gap-2">
+                        <svg class="w-4 h-4 text-accent mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                        </svg>
+                        <div class="flex-1">
+                            <span class="text-xs font-medium text-accent uppercase tracking-wider">Recommended Fix</span>
+                            <p class="text-sm text-slate-300 mt-1 leading-relaxed">{{$fix.Recommendation}}</p>
+                        </div>
+                    </div>
+                </div>
+                {{else if and $fix.FixApplied (ne $fix.FixApplied "Report only - no fix attempted")}}
+                <!-- Fix applied (for autonomous mode) -->
                 <div class="pt-3 border-t border-white/5">
                     <div class="flex items-start gap-2">
                         <svg class="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
