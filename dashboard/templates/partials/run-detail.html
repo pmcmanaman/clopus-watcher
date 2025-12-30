@@ -174,133 +174,210 @@
     </div>
     {{end}}
 
-    <!-- Issues & Fixes Section -->
+    <!-- Issues & Fixes Section - Grouped by Pod -->
     {{if .Fixes}}
     <div class="mb-8 animate-slide-up" style="animation-delay: 0.3s;">
-        <div class="flex items-center gap-2 mb-4">
-            <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>
-            <h2 class="text-sm font-semibold uppercase tracking-widest text-slate-400">Issues & Remediation</h2>
-            <span class="px-2 py-0.5 bg-white/5 text-slate-400 text-xs rounded-full font-mono">{{len .Fixes}}</span>
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                <h2 class="text-sm font-semibold uppercase tracking-widest text-slate-400">Issues & Remediation</h2>
+                <span class="px-2 py-0.5 bg-white/5 text-slate-400 text-xs rounded-full font-mono">{{len .Fixes}} issues</span>
+                <span class="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-xs rounded-full font-mono">{{len (podNames .Fixes)}} pods</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="expandAllPods()" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">Expand All</button>
+                <span class="text-slate-600">|</span>
+                <button onclick="collapseAllPods()" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">Collapse All</button>
+            </div>
         </div>
-        <div class="space-y-3">
-            {{range $i, $fix := .Fixes}}
-            <div class="bg-surface-800/50 rounded-xl p-5 border border-white/5 hover:border-white/10 transition-colors"
-                 style="animation: slideUp 0.3s ease-out {{$i}}50ms both;">
-                <div class="flex items-start justify-between gap-4 mb-3">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-lg bg-surface-900 flex items-center justify-center border border-white/5">
-                            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <div class="font-semibold text-white">{{$fix.PodName}}</div>
-                            <div class="text-xs text-slate-500 font-mono">{{$fix.Timestamp}}</div>
-                        </div>
+
+        {{$grouped := groupByPod .Fixes}}
+        {{range $podIndex, $podName := podNames .Fixes}}
+        <div class="mb-3 pod-group" data-pod="{{$podName}}">
+            <!-- Pod Header (Collapsible) -->
+            <button onclick="togglePodGroup('{{$podName}}')"
+                    class="w-full flex items-center justify-between bg-surface-800/80 rounded-t-xl px-5 py-3 border border-white/5 hover:border-white/10 transition-colors">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-surface-900 flex items-center justify-center border border-white/5">
+                        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                        </svg>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <!-- Severity badge -->
-                        {{if eq $fix.Severity "critical"}}
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded font-medium border border-red-500/20">
-                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                            </svg>
-                            Critical
-                        </span>
-                        {{else if eq $fix.Severity "warning"}}
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 text-amber-400 text-xs rounded font-medium border border-amber-500/20">
-                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                            </svg>
-                            Warning
-                        </span>
-                        {{else if eq $fix.Severity "info"}}
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 text-blue-400 text-xs rounded font-medium border border-blue-500/20">
-                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
-                            </svg>
-                            Info
-                        </span>
-                        {{end}}
-                        <!-- Status badge -->
-                        {{if eq $fix.Status "success"}}
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-xs rounded-lg font-medium border border-emerald-500/20">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                            </svg>
-                            Fixed
-                        </span>
-                        {{else if eq $fix.Status "failed"}}
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-500/10 text-red-400 text-xs rounded-lg font-medium border border-red-500/20">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
-                            Failed
-                        </span>
-                        {{else if eq $fix.Status "reported"}}
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-500/10 text-blue-400 text-xs rounded-lg font-medium border border-blue-500/20">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                            </svg>
-                            Reported
-                        </span>
-                        {{else}}
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-500/10 text-slate-400 text-xs rounded-lg font-medium border border-slate-500/20">
-                            {{$fix.Status}}
-                        </span>
-                        {{end}}
+                    <div class="text-left">
+                        <div class="font-semibold text-white font-mono text-sm">{{$podName}}</div>
+                        <div class="text-xs text-slate-500">{{len (index $grouped $podName)}} issue{{if gt (len (index $grouped $podName)) 1}}s{{end}}</div>
                     </div>
                 </div>
+                <div class="flex items-center gap-2">
+                    {{range $fix := index $grouped $podName}}
+                    {{if eq $fix.Status "success"}}
+                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    {{else if eq $fix.Status "failed"}}
+                    <span class="w-2 h-2 rounded-full bg-red-400"></span>
+                    {{else}}
+                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                    {{end}}
+                    {{end}}
+                    <svg class="w-5 h-5 text-slate-500 transition-transform pod-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+            </button>
 
-                <!-- Error info -->
-                <div class="mb-3">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="text-xs font-medium text-red-400 uppercase tracking-wider">Error</span>
-                        <span class="px-2 py-0.5 bg-red-500/10 text-red-300 text-xs rounded font-mono">{{$fix.ErrorType}}</span>
-                        {{if $fix.Category}}
-                        <span class="px-2 py-0.5 bg-slate-500/10 text-slate-400 text-xs rounded font-medium">{{$fix.Category}}</span>
+            <!-- Pod Issues (Collapsible Content) -->
+            <div class="pod-content bg-surface-800/30 rounded-b-xl border-x border-b border-white/5 overflow-hidden">
+                <div class="divide-y divide-white/5">
+                    {{range $i, $fix := index $grouped $podName}}
+                    <div class="p-4 hover:bg-white/[0.02] transition-colors">
+                        <div class="flex items-start justify-between gap-4 mb-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <!-- Error type -->
+                                <span class="px-2 py-0.5 bg-red-500/10 text-red-300 text-xs rounded font-mono">{{$fix.ErrorType}}</span>
+                                {{if $fix.Category}}
+                                <span class="px-2 py-0.5 bg-slate-500/10 text-slate-400 text-xs rounded font-medium">{{$fix.Category}}</span>
+                                {{end}}
+                                <!-- Severity badge -->
+                                {{if eq $fix.Severity "critical"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded font-medium border border-red-500/20">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                                    </svg>
+                                    Critical
+                                </span>
+                                {{else if eq $fix.Severity "warning"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 text-amber-400 text-xs rounded font-medium border border-amber-500/20">
+                                    Warning
+                                </span>
+                                {{else if eq $fix.Severity "info"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 text-blue-400 text-xs rounded font-medium border border-blue-500/20">
+                                    Info
+                                </span>
+                                {{end}}
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-xs text-slate-500 font-mono">{{$fix.Timestamp}}</span>
+                                <!-- Status badge -->
+                                {{if eq $fix.Status "success"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs rounded font-medium border border-emerald-500/20">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    Fixed
+                                </span>
+                                {{else if eq $fix.Status "failed"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded font-medium border border-red-500/20">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                    Failed
+                                </span>
+                                {{else if eq $fix.Status "reported"}}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 text-blue-400 text-xs rounded font-medium border border-blue-500/20">
+                                    Reported
+                                </span>
+                                {{else}}
+                                <span class="inline-flex items-center px-2 py-0.5 bg-slate-500/10 text-slate-400 text-xs rounded font-medium border border-slate-500/20">
+                                    {{$fix.Status}}
+                                </span>
+                                {{end}}
+                            </div>
+                        </div>
+
+                        <!-- Error description -->
+                        {{if $fix.Issue}}
+                        <p class="text-sm text-slate-300 leading-relaxed mb-2">{{$fix.Issue}}</p>
+                        {{else if $fix.ErrorMessage}}
+                        <p class="text-sm text-slate-400 leading-relaxed mb-2">{{$fix.ErrorMessage}}</p>
+                        {{end}}
+
+                        <!-- Recommendation (for report mode) -->
+                        {{if $fix.Recommendation}}
+                        <div class="mt-2 pt-2 border-t border-white/5">
+                            <div class="flex items-start gap-2">
+                                <svg class="w-4 h-4 text-accent mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                                </svg>
+                                <div class="flex-1">
+                                    <span class="text-xs font-medium text-accent uppercase tracking-wider">Recommended Fix</span>
+                                    <p class="text-sm text-slate-300 mt-1 leading-relaxed">{{$fix.Recommendation}}</p>
+                                </div>
+                            </div>
+                        </div>
+                        {{else if and $fix.FixApplied (ne $fix.FixApplied "Report only - no fix attempted")}}
+                        <!-- Fix applied (for autonomous mode) -->
+                        <div class="mt-2 pt-2 border-t border-white/5">
+                            <div class="flex items-start gap-2">
+                                <svg class="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                                </svg>
+                                <div>
+                                    <span class="text-xs font-medium text-emerald-400 uppercase tracking-wider">Action Taken</span>
+                                    <p class="text-sm text-slate-300 mt-1">{{$fix.FixApplied}}</p>
+                                </div>
+                            </div>
+                        </div>
                         {{end}}
                     </div>
-                    {{if $fix.Issue}}
-                    <p class="text-sm text-slate-300 leading-relaxed">{{$fix.Issue}}</p>
-                    {{else if $fix.ErrorMessage}}
-                    <p class="text-sm text-slate-400 leading-relaxed">{{$fix.ErrorMessage}}</p>
                     {{end}}
                 </div>
-
-                <!-- Recommendation (for report mode) -->
-                {{if $fix.Recommendation}}
-                <div class="pt-3 border-t border-white/5">
-                    <div class="flex items-start gap-2">
-                        <svg class="w-4 h-4 text-accent mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-                        </svg>
-                        <div class="flex-1">
-                            <span class="text-xs font-medium text-accent uppercase tracking-wider">Recommended Fix</span>
-                            <p class="text-sm text-slate-300 mt-1 leading-relaxed">{{$fix.Recommendation}}</p>
-                        </div>
-                    </div>
-                </div>
-                {{else if and $fix.FixApplied (ne $fix.FixApplied "Report only - no fix attempted")}}
-                <!-- Fix applied (for autonomous mode) -->
-                <div class="pt-3 border-t border-white/5">
-                    <div class="flex items-start gap-2">
-                        <svg class="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
-                        </svg>
-                        <div>
-                            <span class="text-xs font-medium text-emerald-400 uppercase tracking-wider">Action Taken</span>
-                            <p class="text-sm text-slate-300 mt-1">{{$fix.FixApplied}}</p>
-                        </div>
-                    </div>
-                </div>
-                {{end}}
             </div>
-            {{end}}
         </div>
+        {{end}}
     </div>
+
+    <script>
+        function togglePodGroup(podName) {
+            const group = document.querySelector(`.pod-group[data-pod="${podName}"]`);
+            if (!group) return;
+
+            const content = group.querySelector('.pod-content');
+            const chevron = group.querySelector('.pod-chevron');
+
+            if (content.style.maxHeight && content.style.maxHeight !== '0px') {
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                chevron.style.transform = 'rotate(-90deg)';
+            } else {
+                content.style.maxHeight = content.scrollHeight + 'px';
+                content.style.opacity = '1';
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function expandAllPods() {
+            document.querySelectorAll('.pod-group').forEach(group => {
+                const content = group.querySelector('.pod-content');
+                const chevron = group.querySelector('.pod-chevron');
+                content.style.maxHeight = content.scrollHeight + 'px';
+                content.style.opacity = '1';
+                chevron.style.transform = 'rotate(0deg)';
+            });
+        }
+
+        function collapseAllPods() {
+            document.querySelectorAll('.pod-group').forEach(group => {
+                const content = group.querySelector('.pod-content');
+                const chevron = group.querySelector('.pod-chevron');
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                chevron.style.transform = 'rotate(-90deg)';
+            });
+        }
+
+        // Initialize all groups as expanded
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.pod-content').forEach(content => {
+                content.style.transition = 'max-height 0.3s ease, opacity 0.2s ease';
+                content.style.maxHeight = content.scrollHeight + 'px';
+                content.style.opacity = '1';
+            });
+            document.querySelectorAll('.pod-chevron').forEach(chevron => {
+                chevron.style.transition = 'transform 0.2s ease';
+            });
+        });
+    </script>
     {{end}}
 
     <!-- Full Log Section -->

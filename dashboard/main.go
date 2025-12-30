@@ -104,6 +104,26 @@ func main() {
 			}
 			return result
 		},
+		// groupByPod groups fixes by their pod name for display
+		"groupByPod": func(fixes []handlers.FixWithRecommendation) map[string][]handlers.FixWithRecommendation {
+			grouped := make(map[string][]handlers.FixWithRecommendation)
+			for _, fix := range fixes {
+				grouped[fix.PodName] = append(grouped[fix.PodName], fix)
+			}
+			return grouped
+		},
+		// podNames returns unique pod names from grouped fixes in order
+		"podNames": func(fixes []handlers.FixWithRecommendation) []string {
+			seen := make(map[string]bool)
+			var names []string
+			for _, fix := range fixes {
+				if !seen[fix.PodName] {
+					seen[fix.PodName] = true
+					names = append(names, fix.PodName)
+				}
+			}
+			return names
+		},
 	}
 
 	// Parse all templates together
