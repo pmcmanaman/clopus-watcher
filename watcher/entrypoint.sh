@@ -17,42 +17,72 @@ validate_config() {
     SQLITE_DIR=$(dirname "$SQLITE_PATH")
     if [ ! -d "$SQLITE_DIR" ]; then
         echo "ERROR: SQLite directory does not exist: $SQLITE_DIR"
+        echo "  SQLITE_PATH: $SQLITE_PATH"
+        echo "  Parent directory contents:"
+        ls -la "$(dirname "$SQLITE_DIR")" 2>&1 | sed 's/^/    /' || echo "    (parent directory also missing)"
+        echo "  Tip: Ensure the volume is mounted correctly"
         errors=$((errors + 1))
     elif [ ! -w "$SQLITE_DIR" ]; then
         echo "ERROR: SQLite directory is not writable: $SQLITE_DIR"
+        echo "  SQLITE_PATH: $SQLITE_PATH"
+        echo "  Directory permissions:"
+        ls -la "$SQLITE_DIR" 2>&1 | head -5 | sed 's/^/    /'
+        echo "  Running as user: $(id)"
+        echo "  Tip: Check volume mount permissions or run with appropriate user"
         errors=$((errors + 1))
     fi
 
     # Validate kubectl is available
     if ! command -v kubectl >/dev/null 2>&1; then
         echo "ERROR: kubectl not found in PATH"
+        echo "  PATH: $PATH"
+        echo "  Tip: Ensure kubectl is installed in the container image"
         errors=$((errors + 1))
+    else
+        echo "  kubectl version: $(kubectl version --client --short 2>/dev/null || kubectl version --client 2>&1 | head -1)"
     fi
 
-    # Validate kubectl can connect to cluster
-    if ! kubectl cluster-info >/dev/null 2>&1; then
-        echo "ERROR: Cannot connect to Kubernetes cluster"
-        errors=$((errors + 1))
+    # Validate kubectl can connect to cluster (only if kubectl exists)
+    if command -v kubectl >/dev/null 2>&1; then
+        if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "ERROR: Cannot connect to Kubernetes cluster"
+            echo "  KUBECONFIG: ${KUBECONFIG:-not set (using default)}"
+            echo "  Current context: $(kubectl config current-context 2>&1 || echo 'none')"
+            echo "  Available contexts: $(kubectl config get-contexts -o name 2>&1 | tr '\n' ', ' | sed 's/,$//')"
+            echo "  Cluster info error:"
+            kubectl cluster-info 2>&1 | sed 's/^/    /'
+            errors=$((errors + 1))
+        fi
     fi
 
     # Validate sqlite3 is available
     if ! command -v sqlite3 >/dev/null 2>&1; then
         echo "ERROR: sqlite3 not found in PATH"
+        echo "  PATH: $PATH"
+        echo "  Tip: Install sqlite3 package in the container image"
         errors=$((errors + 1))
+    else
+        echo "  sqlite3 version: $(sqlite3 --version 2>&1 | head -1)"
     fi
 
     # Validate claude is available
     if ! command -v claude >/dev/null 2>&1; then
         echo "ERROR: claude CLI not found in PATH"
+        echo "  PATH: $PATH"
+        echo "  Expected location: $(which claude 2>&1 || echo 'not found')"
+        echo "  Tip: Ensure Claude Code CLI is installed (npm install -g @anthropic-ai/claude-code)"
         errors=$((errors + 1))
+    else
+        echo "  claude version: $(claude --version 2>&1 | head -1)"
     fi
 
     if [ $errors -gt 0 ]; then
-        echo "Configuration validation failed with $errors error(s)"
+        echo ""
+        echo "=== Configuration validation failed with $errors error(s) ==="
         exit 1
     fi
 
-    echo "Configuration validation passed"
+    echo "=== Configuration validation passed ==="
 }
 
 validate_config
