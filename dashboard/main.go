@@ -91,6 +91,19 @@ func main() {
 			}
 			return m
 		},
+		"add": func(a, b int) int {
+			return a + b
+		},
+		"subtract": func(a, b int) int {
+			return a - b
+		},
+		"iterate": func(count int) []int {
+			result := make([]int, count)
+			for i := 0; i < count; i++ {
+				result[i] = i + 1
+			}
+			return result
+		},
 	}
 
 	// Parse all templates together
@@ -131,6 +144,10 @@ func main() {
 	mux.HandleFunc("/api/namespaces", h.APINamespaces)
 	mux.HandleFunc("/api/runs", h.APIRuns)
 	mux.HandleFunc("/api/run", h.APIRun)
+
+	// Export routes
+	mux.HandleFunc("/api/export/runs", h.ExportRuns)
+	mux.HandleFunc("/api/export/fixes", h.ExportFixes)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,6 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
@@ -196,7 +197,7 @@
         .stagger-4 { animation-delay: 0.4s; }
     </style>
 </head>
-<body class="bg-surface-950 text-white min-h-screen font-sans antialiased">
+<body class="bg-white dark:bg-surface-950 text-slate-900 dark:text-white min-h-screen font-sans antialiased transition-colors">
     <!-- Ambient background -->
     <div class="fixed inset-0 bg-grid pointer-events-none"></div>
     <div class="fixed top-0 left-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -254,6 +255,16 @@
                 </div>
                 {{end}}
 
+                <!-- Theme Toggle -->
+                <button onclick="toggleTheme()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Toggle theme">
+                    <svg id="theme-icon-dark" class="w-4 h-4 text-slate-400 group-hover:text-accent hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                    </svg>
+                    <svg id="theme-icon-light" class="w-4 h-4 text-slate-400 group-hover:text-accent block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                    </svg>
+                </button>
+
                 <!-- Connection Status -->
                 <div class="flex items-center gap-2 text-xs">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full status-pulse"></span>
@@ -271,19 +282,51 @@
             <div class="p-4 border-b border-white/5">
                 <div class="flex items-center justify-between mb-3">
                     <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500">Run History</h2>
-                    <button onclick="refreshRuns()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Refresh">
-                        <svg id="refresh-icon" class="w-4 h-4 text-slate-500 group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                        </svg>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <button onclick="refreshRuns()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Refresh">
+                            <svg id="refresh-icon" class="w-4 h-4 text-slate-500 group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </button>
+                        <!-- Export dropdown -->
+                        <div class="relative">
+                            <button onclick="toggleExportMenu()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Export">
+                                <svg class="w-4 h-4 text-slate-500 group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                </svg>
+                            </button>
+                            <div id="export-menu" class="hidden absolute right-0 mt-2 w-40 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-10">
+                                <a href="/api/export/runs?ns={{.CurrentNS}}&format=json" class="block px-3 py-2 text-sm hover:bg-white/5 rounded-t-lg">Export JSON</a>
+                                <a href="/api/export/runs?ns={{.CurrentNS}}&format=csv" class="block px-3 py-2 text-sm hover:bg-white/5 rounded-b-lg">Export CSV</a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                <!-- Search -->
+                <form action="/" method="GET" class="mb-3">
+                    <input type="hidden" name="ns" value="{{.CurrentNS}}">
+                    <div class="relative">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input type="text" name="q" value="{{.SearchQuery}}" placeholder="Search runs..."
+                               class="w-full bg-surface-800/50 border border-white/5 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20">
+                    </div>
+                </form>
                 <!-- Quick filter -->
                 <div class="flex gap-1">
-                    <button onclick="filterRuns('all')" class="filter-btn active flex-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 transition-colors" data-filter="all">All</button>
-                    <button onclick="filterRuns('ok')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-emerald-500/10 hover:text-emerald-400 transition-colors" data-filter="ok">OK</button>
-                    <button onclick="filterRuns('fixed')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-amber-500/10 hover:text-amber-400 transition-colors" data-filter="fixed">Fixed</button>
-                    <button onclick="filterRuns('failed')" class="filter-btn flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-colors" data-filter="failed">Issues</button>
+                    <button onclick="filterRuns('all')" class="filter-btn {{if eq .StatusFilter ""}}active bg-white/10{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-white/10 transition-colors" data-filter="all">All</button>
+                    <button onclick="filterRuns('ok')" class="filter-btn {{if eq .StatusFilter "ok"}}active bg-emerald-500/10 text-emerald-400{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-emerald-500/10 hover:text-emerald-400 transition-colors" data-filter="ok">OK</button>
+                    <button onclick="filterRuns('fixed')" class="filter-btn {{if eq .StatusFilter "fixed"}}active bg-amber-500/10 text-amber-400{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-amber-500/10 hover:text-amber-400 transition-colors" data-filter="fixed">Fixed</button>
+                    <button onclick="filterRuns('issues')" class="filter-btn {{if eq .StatusFilter "issues"}}active bg-red-500/10 text-red-400{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-colors" data-filter="issues">Issues</button>
                 </div>
+                <!-- Pagination info -->
+                {{if gt .TotalRuns 0}}
+                <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
+                    <span>{{.TotalRuns}} runs</span>
+                    <span>Page {{.CurrentPage}} of {{.TotalPages}}</span>
+                </div>
+                {{end}}
             </div>
 
             <!-- Runs List -->
@@ -292,6 +335,42 @@
                  hx-trigger="every 30s">
                 {{template "runs-list.html" .}}
             </div>
+
+            <!-- Pagination Controls -->
+            {{if gt .TotalPages 1}}
+            <div class="p-3 border-t border-white/5 flex items-center justify-center gap-2">
+                {{if gt .CurrentPage 1}}
+                <a href="/?ns={{.CurrentNS}}&page={{subtract .CurrentPage 1}}{{if .StatusFilter}}&status={{.StatusFilter}}{{end}}{{if .SearchQuery}}&q={{.SearchQuery}}{{end}}"
+                   class="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                    </svg>
+                </a>
+                {{end}}
+
+                <div class="flex items-center gap-1">
+                    {{range $p := iterate .TotalPages}}
+                    {{if or (le $p 2) (ge $p (subtract $.TotalPages 1)) (and (ge $p (subtract $.CurrentPage 1)) (le $p (add $.CurrentPage 1)))}}
+                    <a href="/?ns={{$.CurrentNS}}&page={{$p}}{{if $.StatusFilter}}&status={{$.StatusFilter}}{{end}}{{if $.SearchQuery}}&q={{$.SearchQuery}}{{end}}"
+                       class="w-8 h-8 flex items-center justify-center rounded-lg text-sm transition-colors {{if eq $p $.CurrentPage}}bg-accent text-white{{else}}hover:bg-white/10{{end}}">
+                        {{$p}}
+                    </a>
+                    {{else if or (eq $p 3) (eq $p (subtract $.TotalPages 2))}}
+                    <span class="text-slate-500">...</span>
+                    {{end}}
+                    {{end}}
+                </div>
+
+                {{if lt .CurrentPage .TotalPages}}
+                <a href="/?ns={{.CurrentNS}}&page={{add .CurrentPage 1}}{{if .StatusFilter}}&status={{.StatusFilter}}{{end}}{{if .SearchQuery}}&q={{.SearchQuery}}{{end}}"
+                   class="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </a>
+                {{end}}
+            </div>
+            {{end}}
         </aside>
 
         <!-- Main Content -->
@@ -387,26 +466,54 @@
             setTimeout(() => icon.classList.remove('animate-spin'), 1000);
         }
 
-        // Filter runs
-        let currentFilter = 'all';
+        // Filter runs (server-side)
         function filterRuns(status) {
-            currentFilter = status;
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.remove('active', 'bg-white/10');
-                if (btn.dataset.filter === status) {
-                    btn.classList.add('active', 'bg-white/10');
-                }
-            });
-
-            document.querySelectorAll('.run-item').forEach(item => {
-                if (status === 'all' || item.dataset.status === status ||
-                    (status === 'failed' && (item.dataset.status === 'failed' || item.dataset.status === 'issues_found'))) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
+            const url = new URL(window.location);
+            if (status === 'all') {
+                url.searchParams.delete('status');
+            } else {
+                url.searchParams.set('status', status);
+            }
+            url.searchParams.delete('page'); // Reset to page 1
+            window.location.href = url.toString();
         }
+
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.classList.contains('dark');
+            if (isDark) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // Initialize theme from localStorage
+        (function() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light') {
+                document.documentElement.classList.remove('dark');
+            } else {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+
+        // Export menu toggle
+        function toggleExportMenu() {
+            const menu = document.getElementById('export-menu');
+            menu.classList.toggle('hidden');
+        }
+
+        // Close export menu when clicking outside
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('export-menu');
+            if (!e.target.closest('#export-menu') && !e.target.closest('[onclick="toggleExportMenu()"]')) {
+                menu.classList.add('hidden');
+            }
+        });
 
         // Keyboard shortcuts
         function toggleShortcuts() {

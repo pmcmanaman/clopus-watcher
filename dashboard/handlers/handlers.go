@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
 )
+
+const defaultPageSize = 20
 
 // Validation patterns
 var (
@@ -60,6 +64,46 @@ func validateNamespace(ns string) bool {
 	return namespacePattern.MatchString(ns)
 }
 
+// validatePage validates and parses a page number
+func validatePage(pageStr string) int {
+	if pageStr == "" {
+		return 1
+	}
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		return 1
+	}
+	return page
+}
+
+// validateStatus validates a status filter
+func validateStatus(status string) string {
+	valid := map[string]bool{
+		"":        true,
+		"ok":      true,
+		"fixed":   true,
+		"failed":  true,
+		"issues":  true,
+		"running": true,
+	}
+	if valid[status] {
+		return status
+	}
+	return ""
+}
+
+// validateSearch sanitizes search input
+func validateSearch(search string) string {
+	// Limit length and remove dangerous characters
+	if len(search) > 100 {
+		search = search[:100]
+	}
+	// Remove SQL wildcards that could cause issues
+	search = strings.ReplaceAll(search, "%", "")
+	search = strings.ReplaceAll(search, "_", "")
+	return strings.TrimSpace(search)
+}
+
 // ReportJSON represents the parsed report structure
 type ReportJSON struct {
 	PodCount   int            `json:"pod_count"`
@@ -99,6 +143,14 @@ type PageData struct {
 	Stats           *db.NamespaceStats
 	Log             string
 	ReportSummary   string
+	// Pagination
+	CurrentPage     int
+	TotalPages      int
+	TotalRuns       int
+	PageSize        int
+	// Filters
+	StatusFilter    string
+	SearchQuery     string
 }
 
 func (h *Handler) readLog() string {
@@ -164,6 +216,9 @@ func enrichFixesWithRecommendations(fixes []db.Fix, report string) []FixWithReco
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
 	runIDStr := r.URL.Query().Get("run")
+	page := validatePage(r.URL.Query().Get("page"))
+	statusFilter := validateStatus(r.URL.Query().Get("status"))
+	searchQuery := validateSearch(r.URL.Query().Get("q"))
 
 	// Validate inputs
 	if !validateNamespace(namespace) {
@@ -182,7 +237,6 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	namespaces, err := h.db.GetNamespaces()
 	if err != nil {
 		log.Printf("Error getting namespaces: %v", err)
-		// Continue with empty list rather than error
 		namespaces = []db.NamespaceStats{}
 	}
 
@@ -191,7 +245,23 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		namespace = namespaces[0].Namespace
 	}
 
-	runs, err := h.db.GetRuns(namespace, 50)
+	// Get total count for pagination
+	totalRuns, err := h.db.CountRuns(namespace, statusFilter, searchQuery)
+	if err != nil {
+		log.Printf("Error counting runs: %v", err)
+		totalRuns = 0
+	}
+
+	totalPages := (totalRuns + defaultPageSize - 1) / defaultPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	offset := (page - 1) * defaultPageSize
+	runs, err := h.db.GetRunsPaginated(namespace, defaultPageSize, offset, statusFilter, searchQuery)
 	if err != nil {
 		log.Printf("Error getting runs for namespace %s: %v", namespace, err)
 		runs = []db.Run{}
@@ -251,6 +321,12 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		Stats:         stats,
 		Log:           h.readLog(),
 		ReportSummary: reportSummary,
+		CurrentPage:   page,
+		TotalPages:    totalPages,
+		TotalRuns:     totalRuns,
+		PageSize:      defaultPageSize,
+		StatusFilter:  statusFilter,
+		SearchQuery:   searchQuery,
 	}
 
 	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -426,4 +502,143 @@ func (h *Handler) APIRun(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+// Export endpoints
+func (h *Handler) ExportRuns(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	format := r.URL.Query().Get("format")
+	statusFilter := validateStatus(r.URL.Query().Get("status"))
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	if format != "csv" && format != "json" {
+		format = "json"
+	}
+
+	// Get all runs (no pagination for export)
+	runs, err := h.db.GetRunsPaginated(namespace, 10000, 0, statusFilter, "")
+	if err != nil {
+		log.Printf("Error getting runs for export: %v", err)
+		http.Error(w, "Error retrieving runs", http.StatusInternalServerError)
+		return
+	}
+
+	filename := "clopus-runs"
+	if namespace != "" {
+		filename += "-" + namespace
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.csv\"", filename))
+		h.writeRunsCSV(w, runs)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.json\"", filename))
+		json.NewEncoder(w).Encode(runs)
+	}
+}
+
+func (h *Handler) writeRunsCSV(w http.ResponseWriter, runs []db.Run) {
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Header
+	writer.Write([]string{
+		"ID", "Started At", "Ended At", "Namespace", "Mode", "Status",
+		"Pod Count", "Error Count", "Fix Count",
+	})
+
+	// Data rows
+	for _, run := range runs {
+		writer.Write([]string{
+			strconv.Itoa(run.ID),
+			run.StartedAt,
+			run.EndedAt,
+			run.Namespace,
+			run.Mode,
+			run.Status,
+			strconv.Itoa(run.PodCount),
+			strconv.Itoa(run.ErrorCount),
+			strconv.Itoa(run.FixCount),
+		})
+	}
+}
+
+func (h *Handler) ExportFixes(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	format := r.URL.Query().Get("format")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	if format != "csv" && format != "json" {
+		format = "json"
+	}
+
+	// Get all fixes
+	fixes, err := h.db.GetFixes(10000)
+	if err != nil {
+		log.Printf("Error getting fixes for export: %v", err)
+		http.Error(w, "Error retrieving fixes", http.StatusInternalServerError)
+		return
+	}
+
+	// Filter by namespace if specified
+	if namespace != "" {
+		filtered := []db.Fix{}
+		for _, fix := range fixes {
+			if fix.Namespace == namespace {
+				filtered = append(filtered, fix)
+			}
+		}
+		fixes = filtered
+	}
+
+	filename := "clopus-fixes"
+	if namespace != "" {
+		filename += "-" + namespace
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.csv\"", filename))
+		h.writeFixesCSV(w, fixes)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.json\"", filename))
+		json.NewEncoder(w).Encode(fixes)
+	}
+}
+
+func (h *Handler) writeFixesCSV(w http.ResponseWriter, fixes []db.Fix) {
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Header
+	writer.Write([]string{
+		"ID", "Run ID", "Timestamp", "Namespace", "Pod Name",
+		"Error Type", "Error Message", "Fix Applied", "Status",
+	})
+
+	// Data rows
+	for _, fix := range fixes {
+		writer.Write([]string{
+			strconv.Itoa(fix.ID),
+			strconv.Itoa(fix.RunID),
+			fix.Timestamp,
+			fix.Namespace,
+			fix.PodName,
+			fix.ErrorType,
+			fix.ErrorMessage,
+			fix.FixApplied,
+			fix.Status,
+		})
+	}
 }

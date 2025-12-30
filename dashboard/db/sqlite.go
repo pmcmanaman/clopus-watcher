@@ -137,20 +137,41 @@ func (db *DB) CompleteRun(id int64, status string, podCount, errorCount, fixCoun
 }
 
 func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
+	return db.GetRunsPaginated(namespace, limit, 0, "", "")
+}
+
+// GetRunsPaginated returns runs with pagination and optional filters
+func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, search string) ([]Run, error) {
 	query := `
 		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
 		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, '')
 		FROM runs
+		WHERE 1=1
 	`
 	args := []interface{}{}
 
 	if namespace != "" {
-		query += " WHERE namespace = ?"
+		query += " AND namespace = ?"
 		args = append(args, namespace)
 	}
 
-	query += " ORDER BY started_at DESC LIMIT ?"
-	args = append(args, limit)
+	if status != "" {
+		if status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, status)
+		}
+	}
+
+	if search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := db.conn.Query(query, args...)
 	if err != nil {
@@ -169,6 +190,36 @@ func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
 		runs = append(runs, r)
 	}
 	return runs, nil
+}
+
+// CountRuns returns total count of runs matching filters
+func (db *DB) CountRuns(namespace, status, search string) (int, error) {
+	query := "SELECT COUNT(*) FROM runs WHERE 1=1"
+	args := []interface{}{}
+
+	if namespace != "" {
+		query += " AND namespace = ?"
+		args = append(args, namespace)
+	}
+
+	if status != "" {
+		if status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, status)
+		}
+	}
+
+	if search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	var count int
+	err := db.conn.QueryRow(query, args...).Scan(&count)
+	return count, err
 }
 
 func (db *DB) GetRun(id int) (*Run, error) {
