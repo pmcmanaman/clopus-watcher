@@ -91,6 +91,9 @@ func main() {
 			}
 			return m
 		},
+		"split": func(s, sep string) []string {
+			return strings.Split(s, sep)
+		},
 		"add": func(a, b int) int {
 			return a + b
 		},
@@ -169,6 +172,12 @@ func main() {
 	// Export routes
 	mux.HandleFunc("/api/export/runs", h.ExportRuns)
 	mux.HandleFunc("/api/export/fixes", h.ExportFixes)
+
+	// Trigger route
+	mux.HandleFunc("/api/trigger", h.TriggerRun)
+
+	// Database reset route
+	mux.HandleFunc("/api/reset", h.ResetDatabase)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

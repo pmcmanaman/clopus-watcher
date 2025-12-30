@@ -47,7 +47,26 @@
                     <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/>
                     </svg>
+                    {{if .CurrentNS}}
+                    <span class="font-mono text-slate-300">{{.CurrentNS}}</span>
+                    {{else}}
+                    {{$nsList := split .Run.Namespace ","}}
+                    {{if gt (len $nsList) 3}}
+                    <div class="relative group">
+                        <span class="font-mono text-slate-300 cursor-pointer">{{len $nsList}} namespaces</span>
+                        <div class="hidden group-hover:block absolute top-full left-0 mt-2 p-3 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-10 max-h-64 overflow-y-auto scrollbar-thin min-w-48">
+                            <div class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Namespaces in this run:</div>
+                            <div class="flex flex-wrap gap-1">
+                                {{range $nsList}}
+                                <span class="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-xs rounded font-mono">{{.}}</span>
+                                {{end}}
+                            </div>
+                        </div>
+                    </div>
+                    {{else}}
                     <span class="font-mono text-slate-300">{{.Run.Namespace}}</span>
+                    {{end}}
+                    {{end}}
                 </div>
                 <div class="flex items-center gap-2">
                     <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -56,6 +75,14 @@
                     </svg>
                     <span class="capitalize">{{.Run.Mode}} mode</span>
                 </div>
+                {{if .Run.ProactiveChecks}}
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                    </svg>
+                    <span class="text-cyan-400">Proactive checks enabled</span>
+                </div>
+                {{end}}
                 <div class="flex items-center gap-2">
                     <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>

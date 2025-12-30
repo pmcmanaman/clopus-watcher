@@ -8,9 +8,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
 )
@@ -458,12 +460,17 @@ func (h *Handler) RunsList(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 	runIDStr := r.URL.Query().Get("id")
+	namespace := r.URL.Query().Get("ns")
 
 	runID, err := validateRunID(runIDStr)
 	if err != nil || runID <= 0 {
 		log.Printf("Invalid run ID parameter in RunDetail: %s", runIDStr)
 		http.Error(w, "Invalid run ID", http.StatusBadRequest)
 		return
+	}
+
+	if !validateNamespace(namespace) {
+		namespace = ""
 	}
 
 	run, err := h.db.GetRun(runID)
@@ -499,7 +506,8 @@ func (h *Handler) RunDetail(w http.ResponseWriter, r *http.Request) {
 		Fixes         []FixWithRecommendation
 		ReportSummary string
 		ReportDetails []ReportDetailWithCommands
-	}{run, enrichedFixes, reportSummary, reportDetails}
+		CurrentNS     string
+	}{run, enrichedFixes, reportSummary, reportDetails, namespace}
 
 	if err := h.tmpl.ExecuteTemplate(w, "run-detail.html", data); err != nil {
 		log.Printf("Error executing run-detail template: %v", err)
@@ -831,4 +839,92 @@ func (h *Handler) Compare(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error executing compare template: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
+}
+
+// ResetDatabase clears all runs and fixes from the database
+func (h *Handler) ResetDatabase(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	err := h.db.ResetDatabase()
+	if err != nil {
+		log.Printf("Error resetting database: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to reset database: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Database reset successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Database reset successfully",
+	})
+}
+
+// TriggerRun creates a new Job from the CronJob to trigger an immediate run
+func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get parameters
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "report" // Default to report mode for safety
+	}
+	if mode != "report" && mode != "autonomous" {
+		http.Error(w, "Invalid mode: use 'report' or 'autonomous'", http.StatusBadRequest)
+		return
+	}
+
+	// Get cronjob name from environment or use default
+	cronjobName := os.Getenv("CRONJOB_NAME")
+	if cronjobName == "" {
+		cronjobName = "clopus-watcher"
+	}
+	cronjobNamespace := os.Getenv("CRONJOB_NAMESPACE")
+	if cronjobNamespace == "" {
+		cronjobNamespace = "default"
+	}
+
+	// Generate unique job name
+	timestamp := time.Now().Unix()
+	jobName := fmt.Sprintf("%s-manual-%d", cronjobName, timestamp)
+
+	// Create job from cronjob using kubectl
+	cmd := exec.Command("kubectl", "create", "job", jobName,
+		"--from=cronjob/"+cronjobName,
+		"-n", cronjobNamespace)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error triggering run: %v, output: %s", err, string(output))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to trigger run: %v", err),
+			"output":  string(output),
+		})
+		return
+	}
+
+	log.Printf("Triggered manual run: %s", jobName)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"job":     jobName,
+		"mode":    mode,
+		"message": fmt.Sprintf("Run triggered successfully. Job: %s", jobName),
+	})
 }

@@ -29,9 +29,47 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
-  # Optional: read configmaps/secrets for debugging
+  # Read configmaps for debugging
   - apiGroups: [""]
     resources: ["configmaps"]
+    verbs: ["get", "list"]
+  # Read nodes for resource checking (proactive checks)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  # Read PVCs for storage checks (proactive checks)
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  # Read deployments for HA checks (proactive checks)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list"]
+  # Read HPA/PDB for availability checks (proactive checks)
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  # Read secrets for TLS cert checks (proactive checks)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  # Read ingress for cert checks (proactive checks)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  # Read resource quotas (proactive checks)
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list"]
+  # Create jobs from cronjob (dashboard trigger feature)
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

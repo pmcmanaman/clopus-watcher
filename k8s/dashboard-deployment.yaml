@@ -13,6 +13,7 @@ spec:
       labels:
         app: dashboard
     spec:
+      serviceAccountName: clopus-watcher
       # Uncomment if using private registry:
       # imagePullSecrets:
       #   - name: regcred

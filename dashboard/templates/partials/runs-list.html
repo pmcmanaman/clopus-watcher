@@ -58,7 +58,12 @@
         <div class="flex items-center gap-3 flex-wrap">
             <!-- Namespace badge (shown when viewing all namespaces) -->
             {{if $.ShowAllNamespaces}}
+            {{$nsList := split $run.Namespace ","}}
+            {{if gt (len $nsList) 2}}
+            <span class="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-xs rounded font-medium border border-indigo-500/20" title="{{$run.Namespace}}">{{len $nsList}} ns</span>
+            {{else}}
             <span class="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-xs rounded font-medium border border-indigo-500/20">{{$run.Namespace}}</span>
+            {{end}}
             {{end}}
             <!-- Mode badge -->
             <span class="px-2 py-0.5 bg-white/5 text-slate-400 text-xs rounded font-medium">{{$run.Mode}}</span>
