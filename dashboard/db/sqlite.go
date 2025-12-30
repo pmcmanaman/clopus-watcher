@@ -92,6 +92,15 @@ func New(path string) (*DB, error) {
 	// Add run_id column if it doesn't exist (migration for existing DBs)
 	conn.Exec(`ALTER TABLE fixes ADD COLUMN run_id INTEGER`)
 
+	// Create indices for better query performance
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_namespace ON runs(namespace)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_namespace_status ON runs(namespace, status)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_run_id ON fixes(run_id)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_timestamp ON fixes(timestamp DESC)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_namespace ON fixes(namespace)`)
+
 	return &DB{conn: conn}, nil
 }
 
