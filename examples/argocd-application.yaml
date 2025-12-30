@@ -1,0 +1,179 @@
+# ArgoCD Application for Clopus Watcher
+#
+# Prerequisites:
+# 1. Create the namespace and API key secret first:
+#
+#    kubectl create namespace clopus-watcher
+#    kubectl create secret generic anthropic-api-key \
+#      --from-literal=api-key=YOUR_API_KEY \
+#      -n clopus-watcher
+#
+# 2. Apply this Application manifest:
+#    kubectl apply -f argocd-application.yaml
+#
+# Helm Repository Options:
+# - GitHub Pages: https://<owner>.github.io/clopus-watcher/
+# - OCI (GHCR):   oci://ghcr.io/<owner>/charts/clopus-watcher
+#
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clopus-watcher
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Option 1: GitHub Pages Helm Repository
+    repoURL: https://pmcmanaman.github.io/clopus-watcher/
+    chart: clopus-watcher
+    targetRevision: 0.1.0  # Or use '*' for latest
+
+    # Option 2: OCI Registry (uncomment below, comment above)
+    # repoURL: ghcr.io/pmcmanaman/charts
+    # chart: clopus-watcher
+    # targetRevision: 0.1.0
+
+    helm:
+      releaseName: clopus-watcher
+      values: |
+        # Watcher configuration
+        watcher:
+          schedule: "*/5 * * * *"
+          targetNamespaces:
+            - default
+            - production
+          excludeNamespaces:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - argocd
+          mode: autonomous
+          proactiveChecks: false
+
+        # Use existing API key secret
+        auth:
+          mode: api-key
+          apiKey:
+            existingSecret: anthropic-api-key
+            secretKey: api-key
+
+        # Dashboard configuration
+        dashboard:
+          enabled: true
+          ingress:
+            enabled: false
+            # Uncomment to enable ingress
+            # enabled: true
+            # className: nginx
+            # annotations:
+            #   cert-manager.io/cluster-issuer: letsencrypt-prod
+            # hosts:
+            #   - host: clopus.example.com
+            #     paths:
+            #       - path: /
+            #         pathType: Prefix
+            # tls:
+            #   - secretName: clopus-tls
+            #     hosts:
+            #       - clopus.example.com
+
+        # Persistence
+        persistence:
+          enabled: true
+          size: 2Gi
+
+        # Database retention
+        database:
+          retentionDays: 30
+
+        # Prometheus metrics
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: false
+            # Set to true if using Prometheus Operator
+            # labels:
+            #   release: prometheus
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clopus-watcher
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+# Alternative: Report-only mode Application
+# Use this if you only want to detect issues without auto-fixing
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clopus-watcher-report
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://pmcmanaman.github.io/clopus-watcher/
+    chart: clopus-watcher
+    targetRevision: 0.1.0
+
+    helm:
+      releaseName: clopus-watcher
+      values: |
+        watcher:
+          schedule: "*/10 * * * *"
+          targetNamespaces:
+            - "*"  # Monitor all namespaces
+          excludeNamespaces:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - argocd
+            - clopus-watcher
+          mode: report  # Report-only mode
+          proactiveChecks: true  # Enable proactive checks
+
+        auth:
+          mode: api-key
+          apiKey:
+            existingSecret: anthropic-api-key
+            secretKey: api-key
+
+        dashboard:
+          enabled: true
+
+        persistence:
+          enabled: true
+          size: 5Gi
+
+        database:
+          retentionDays: 90
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clopus-watcher
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

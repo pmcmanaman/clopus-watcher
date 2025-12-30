@@ -2,12 +2,163 @@
 set -e
 
 echo "=== Clopus Watcher Starting ==="
-echo "Target namespace: $TARGET_NAMESPACE"
+
+# === CONFIGURATION VALIDATION ===
+validate_config() {
+    local errors=0
+
+    # Validate SQLITE_PATH
+    if [ -z "$SQLITE_PATH" ]; then
+        echo "WARNING: SQLITE_PATH not set, using default /data/watcher.db"
+        SQLITE_PATH="/data/watcher.db"
+    fi
+
+    # Validate SQLITE_PATH directory exists
+    SQLITE_DIR=$(dirname "$SQLITE_PATH")
+    if [ ! -d "$SQLITE_DIR" ]; then
+        echo "ERROR: SQLite directory does not exist: $SQLITE_DIR"
+        errors=$((errors + 1))
+    elif [ ! -w "$SQLITE_DIR" ]; then
+        echo "ERROR: SQLite directory is not writable: $SQLITE_DIR"
+        errors=$((errors + 1))
+    fi
+
+    # Validate kubectl is available
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "ERROR: kubectl not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    # Validate kubectl can connect to cluster
+    if ! kubectl cluster-info >/dev/null 2>&1; then
+        echo "ERROR: Cannot connect to Kubernetes cluster"
+        errors=$((errors + 1))
+    fi
+
+    # Validate sqlite3 is available
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "ERROR: sqlite3 not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    # Validate claude is available
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "ERROR: claude CLI not found in PATH"
+        errors=$((errors + 1))
+    fi
+
+    if [ $errors -gt 0 ]; then
+        echo "Configuration validation failed with $errors error(s)"
+        exit 1
+    fi
+
+    echo "Configuration validation passed"
+}
+
+validate_config
 echo "SQLite path: $SQLITE_PATH"
+
+# === SQL SAFETY FUNCTIONS ===
+# Escape single quotes for SQL strings (prevents SQL injection)
+sql_escape() {
+    echo "$1" | sed "s/'/''/g"
+}
+
+# Validate numeric value (prevents SQL injection in numeric fields)
+validate_numeric() {
+    local value="$1"
+    local default="${2:-0}"
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "$value"
+    else
+        echo "$default"
+    fi
+}
 
 # === WATCHER MODE ===
 WATCHER_MODE="${WATCHER_MODE:-autonomous}"
+# Validate watcher mode
+case "$WATCHER_MODE" in
+    autonomous|report) ;;
+    *)
+        echo "ERROR: Invalid WATCHER_MODE: $WATCHER_MODE (use 'autonomous' or 'report')"
+        exit 1
+        ;;
+esac
 echo "Watcher mode: $WATCHER_MODE"
+
+# === PROACTIVE CHECKS ===
+PROACTIVE_CHECKS="${PROACTIVE_CHECKS:-false}"
+echo "Proactive checks: $PROACTIVE_CHECKS"
+
+# === NAMESPACE RESOLUTION ===
+TARGET_NAMESPACES="${TARGET_NAMESPACES:-default}"
+EXCLUDE_NAMESPACES="${EXCLUDE_NAMESPACES:-kube-system,kube-public,kube-node-lease}"
+
+echo "Target namespace patterns: $TARGET_NAMESPACES"
+echo "Exclude namespace patterns: $EXCLUDE_NAMESPACES"
+
+# Get all cluster namespaces
+ALL_NAMESPACES=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
+
+# Function to match namespace against pattern (supports * wildcard)
+matches_pattern() {
+    local ns="$1"
+    local pattern="$2"
+    # Convert glob pattern to regex: * becomes .*
+    local regex="^$(echo "$pattern" | sed 's/\*/.*/')$"
+    [[ "$ns" =~ $regex ]]
+}
+
+# Resolve target namespaces (expand wildcards)
+RESOLVED_NAMESPACES=""
+IFS=',' read -ra TARGET_PATTERNS <<< "$TARGET_NAMESPACES"
+for pattern in "${TARGET_PATTERNS[@]}"; do
+    pattern=$(echo "$pattern" | xargs)  # trim whitespace
+    for ns in $ALL_NAMESPACES; do
+        if matches_pattern "$ns" "$pattern"; then
+            if [ -z "$RESOLVED_NAMESPACES" ]; then
+                RESOLVED_NAMESPACES="$ns"
+            else
+                # Only add if not already in list
+                if ! echo ",$RESOLVED_NAMESPACES," | grep -q ",$ns,"; then
+                    RESOLVED_NAMESPACES="$RESOLVED_NAMESPACES,$ns"
+                fi
+            fi
+        fi
+    done
+done
+
+# Apply exclusions
+IFS=',' read -ra EXCLUDE_PATTERNS <<< "$EXCLUDE_NAMESPACES"
+FINAL_NAMESPACES=""
+IFS=',' read -ra RESOLVED_LIST <<< "$RESOLVED_NAMESPACES"
+for ns in "${RESOLVED_LIST[@]}"; do
+    excluded=false
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        pattern=$(echo "$pattern" | xargs)  # trim whitespace
+        if matches_pattern "$ns" "$pattern"; then
+            excluded=true
+            break
+        fi
+    done
+    if [ "$excluded" = false ]; then
+        if [ -z "$FINAL_NAMESPACES" ]; then
+            FINAL_NAMESPACES="$ns"
+        else
+            FINAL_NAMESPACES="$FINAL_NAMESPACES,$ns"
+        fi
+    fi
+done
+
+# Fallback to default if no namespaces resolved
+if [ -z "$FINAL_NAMESPACES" ]; then
+    echo "WARNING: No namespaces matched patterns, falling back to 'default'"
+    FINAL_NAMESPACES="default"
+fi
+
+echo "Resolved namespaces: $FINAL_NAMESPACES"
+NAMESPACE_COUNT=$(echo "$FINAL_NAMESPACES" | tr ',' '\n' | wc -l | xargs)
 
 # === AUTHENTICATION SETUP ===
 AUTH_MODE="${AUTH_MODE:-api-key}"
@@ -70,11 +221,19 @@ sqlite3 "$SQLITE_PATH" "ALTER TABLE fixes ADD COLUMN run_id INTEGER;" 2>/dev/nul
 echo "Database initialized"
 
 # === CREATE RUN RECORD ===
-RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$TARGET_NAMESPACE', '$WATCHER_MODE', 'running'); SELECT last_insert_rowid();")
+ESCAPED_NAMESPACES=$(sql_escape "$FINAL_NAMESPACES")
+ESCAPED_MODE=$(sql_escape "$WATCHER_MODE")
+RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$ESCAPED_NAMESPACES', '$ESCAPED_MODE', 'running'); SELECT last_insert_rowid();")
+RUN_ID=$(validate_numeric "$RUN_ID" "0")
+if [ "$RUN_ID" = "0" ]; then
+    echo "ERROR: Failed to create run record"
+    exit 1
+fi
 echo "Created run #$RUN_ID"
 
 # === GET LAST RUN TIME ===
-LAST_RUN_TIME=$(sqlite3 "$SQLITE_PATH" "SELECT COALESCE(MAX(ended_at), '') FROM runs WHERE namespace = '$TARGET_NAMESPACE' AND status != 'running' AND id != $RUN_ID;")
+# Get last run time across any of the target namespaces
+LAST_RUN_TIME=$(sqlite3 "$SQLITE_PATH" "SELECT COALESCE(MAX(ended_at), '') FROM runs WHERE status != 'running' AND id != $RUN_ID;")
 echo "Last run time: ${LAST_RUN_TIME:-'(first run)'}"
 
 # === SELECT PROMPT ===
@@ -86,14 +245,25 @@ fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
     echo "ERROR: Prompt file not found: $PROMPT_FILE"
-    sqlite3 "$SQLITE_PATH" "UPDATE runs SET ended_at = datetime('now'), status = 'failed', report = 'Prompt file not found' WHERE id = $RUN_ID;"
+    sqlite3 "$SQLITE_PATH" "UPDATE runs SET ended_at = datetime('now'), status = 'failed', report = 'Prompt file not found' WHERE id = $(validate_numeric $RUN_ID);"
     exit 1
 fi
 
 PROMPT=$(cat "$PROMPT_FILE")
 
+# Append proactive checks if enabled
+if [ "$PROACTIVE_CHECKS" = "true" ]; then
+    PROACTIVE_FILE="/app/proactive-checks.md"
+    if [ -f "$PROACTIVE_FILE" ]; then
+        echo "Adding proactive checks to prompt"
+        PROMPT="$PROMPT
+
+$(cat "$PROACTIVE_FILE")"
+    fi
+fi
+
 # Replace environment variables in prompt
-PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACE|$TARGET_NAMESPACE|g")
+PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACES|$FINAL_NAMESPACES|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$SQLITE_PATH|$SQLITE_PATH|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$RUN_ID|$RUN_ID|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$LAST_RUN_TIME|$LAST_RUN_TIME|g")
@@ -103,7 +273,7 @@ echo "Starting Claude Code..."
 
 LOG_FILE="/data/watcher.log"
 echo "=== Run #$RUN_ID started at $(date -Iseconds) ===" > "$LOG_FILE"
-echo "Mode: $WATCHER_MODE | Namespace: $TARGET_NAMESPACE" >> "$LOG_FILE"
+echo "Mode: $WATCHER_MODE | Namespaces: $FINAL_NAMESPACES" >> "$LOG_FILE"
 echo "----------------------------------------" >> "$LOG_FILE"
 
 # Capture output
@@ -126,21 +296,45 @@ FIX_COUNT=0
 STATUS="ok"
 
 if [ -n "$REPORT" ]; then
-    # Parse pod_count
-    PARSED=$(echo "$REPORT" | grep -o '"pod_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && POD_COUNT=$PARSED
+    # Validate JSON structure first
+    if command -v jq >/dev/null 2>&1; then
+        # Use jq for robust JSON parsing
+        if echo "$REPORT" | jq empty 2>/dev/null; then
+            echo "Report JSON is valid, parsing with jq"
+            PARSED=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && POD_COUNT=$PARSED
 
-    # Parse error_count
-    PARSED=$(echo "$REPORT" | grep -o '"error_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && ERROR_COUNT=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.error_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && ERROR_COUNT=$PARSED
 
-    # Parse fix_count
-    PARSED=$(echo "$REPORT" | grep -o '"fix_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$PARSED" ] && FIX_COUNT=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && FIX_COUNT=$PARSED
 
-    # Parse status
-    PARSED=$(echo "$REPORT" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
-    [ -n "$PARSED" ] && STATUS=$PARSED
+            PARSED=$(echo "$REPORT" | jq -r '.status // "ok"' 2>/dev/null)
+            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && STATUS=$PARSED
+        else
+            echo "WARNING: Report JSON is invalid, skipping parse"
+        fi
+    else
+        # Fallback to grep/sed parsing (less robust)
+        echo "jq not available, using grep/sed fallback"
+
+        # Parse pod_count
+        PARSED=$(echo "$REPORT" | grep -o '"pod_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && POD_COUNT=$PARSED
+
+        # Parse error_count
+        PARSED=$(echo "$REPORT" | grep -o '"error_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && ERROR_COUNT=$PARSED
+
+        # Parse fix_count
+        PARSED=$(echo "$REPORT" | grep -o '"fix_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+        [ -n "$PARSED" ] && FIX_COUNT=$PARSED
+
+        # Parse status
+        PARSED=$(echo "$REPORT" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+        [ -n "$PARSED" ] && STATUS=$PARSED
+    fi
 fi
 
 # Validate status is one of expected values
@@ -149,24 +343,33 @@ case "$STATUS" in
     *) STATUS="ok" ;;
 esac
 
+# Validate parsed numeric values
+POD_COUNT=$(validate_numeric "$POD_COUNT" "0")
+ERROR_COUNT=$(validate_numeric "$ERROR_COUNT" "0")
+FIX_COUNT=$(validate_numeric "$FIX_COUNT" "0")
+
 echo "Final values: pods=$POD_COUNT errors=$ERROR_COUNT fixes=$FIX_COUNT status=$STATUS"
 
-# Read full log (limit size to prevent issues)
-FULL_LOG=$(head -c 100000 "$LOG_FILE" | sed "s/'/''/g")
+# Read full log (limit size to prevent issues) and escape for SQL
+FULL_LOG=$(head -c 100000 "$LOG_FILE")
+FULL_LOG_ESCAPED=$(sql_escape "$FULL_LOG")
 
 # Escape report for SQL
-REPORT_ESCAPED=$(echo "$REPORT" | sed "s/'/''/g")
+REPORT_ESCAPED=$(sql_escape "$REPORT")
+
+# Escape status for SQL
+STATUS_ESCAPED=$(sql_escape "$STATUS")
 
 # === UPDATE RUN RECORD ===
 sqlite3 "$SQLITE_PATH" "UPDATE runs SET
     ended_at = datetime('now'),
-    status = '$STATUS',
+    status = '$STATUS_ESCAPED',
     pod_count = $POD_COUNT,
     error_count = $ERROR_COUNT,
     fix_count = $FIX_COUNT,
     report = '$REPORT_ESCAPED',
-    log = '$FULL_LOG'
-WHERE id = $RUN_ID;"
+    log = '$FULL_LOG_ESCAPED'
+WHERE id = $(validate_numeric $RUN_ID);"
 
 echo "Run #$RUN_ID completed with status: $STATUS"
 

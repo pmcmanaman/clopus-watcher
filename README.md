@@ -5,71 +5,186 @@ A Kubernetes-native Claude Code watcher that monitors pods, detects errors, and 
 ## Overview
 
 Clopus Watcher runs as a CronJob that:
-1. Monitors pods in a target namespace
+1. Monitors pods across target namespaces (supports wildcards)
 2. Detects degraded pods (CrashLoopBackOff, Error, etc.)
 3. Reads logs to understand the error
-4. Execs into the pod, explores and applies a hotfix
-5. Records the fix to SQLite & provides a report
+4. In autonomous mode: execs into the pod, explores and applies a hotfix
+5. In report mode: generates a detailed report with recommendations
+6. Records findings to SQLite & provides a web dashboard
 
 A separate Dashboard deployment provides a web UI to view all detected errors and applied fixes.
 
-## Prerequisites
+## Quick Start
 
-**Cluster:**
+### Prerequisites
 
 - Kubernetes cluster
-- Sealed Secrets (for API key / Claude Code Credentials file)
+- Helm 3.0+
+- Anthropic API key
 
-**Local (to build the images):**
+### Deploy with Helm
 
-- podman / docker / etc.
-- kubectl
-- container registry access
+```bash
+# Add the Helm repository
+helm repo add clopus https://pmcmanaman.github.io/clopus-watcher/
+helm repo update
+
+# Create namespace and API key secret
+kubectl create namespace clopus-watcher
+kubectl create secret generic anthropic-api-key \
+  --from-literal=api-key=YOUR_API_KEY \
+  -n clopus-watcher
+
+# Install
+helm install clopus-watcher clopus/clopus-watcher \
+  --namespace clopus-watcher \
+  --set auth.apiKey.existingSecret=anthropic-api-key
+```
+
+### Deploy with ArgoCD
+
+```bash
+# Create the API key secret first
+kubectl create namespace clopus-watcher
+kubectl create secret generic anthropic-api-key \
+  --from-literal=api-key=YOUR_API_KEY \
+  -n clopus-watcher
+
+# Apply the ArgoCD Application
+kubectl apply -f examples/argocd-application.yaml
+```
+
+See [examples/argocd-application.yaml](examples/argocd-application.yaml) for full configuration options.
 
 ## Configuration
 
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `TARGET_NAMESPACE` | Namespace to monitor | `default` |
-| `AUTH_MODE` | Auth method: `api-key` or `credentials` | `api-key` |
-| `WATCHER_MODE` | Watcher mode: `autonomous` or `watcher` | `autonomous` |
-| `ANTHROPIC_API_KEY` | Claude API key (if AUTH_MODE=api-key) | - |
-| `SQLITE_PATH` | Path to SQLite database | `/data/watcher.db` |
+### Helm Values
 
-## Deployment
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `watcher.schedule` | CronJob schedule | `*/5 * * * *` |
+| `watcher.targetNamespaces` | Namespaces to monitor (supports wildcards) | `["default"]` |
+| `watcher.excludeNamespaces` | Namespaces to exclude | `["kube-system", ...]` |
+| `watcher.mode` | Mode: `autonomous` or `report` | `autonomous` |
+| `watcher.proactiveChecks` | Enable proactive issue detection | `false` |
+| `dashboard.enabled` | Enable web dashboard | `true` |
+| `dashboard.ingress.enabled` | Enable ingress | `false` |
+| `auth.mode` | Auth mode: `api-key` or `credentials` | `api-key` |
+| `persistence.enabled` | Enable persistent storage | `true` |
+| `metrics.enabled` | Enable Prometheus metrics | `true` |
 
-### Option 1: API Key (Recommended)
+See [chart/README.md](chart/README.md) for full configuration reference.
 
-```bash
-# 1. Create namespace
-kubectl create namespace clopus-watcher
+### Namespace Wildcards
 
-# 2. Create secret with API key
-kubectl create secret generic claude-auth \
-  --namespace clopus-watcher \
-  --from-literal=api-key=sk-ant-xxxxx
+Monitor multiple namespaces with patterns:
 
-# 3. Ensure AUTH_MODE=api-key in k8s/cronjob.yaml (default)
-
-# 4. Deploy
-./scripts/deploy.sh
+```yaml
+watcher:
+  targetNamespaces:
+    - production          # Exact match
+    - "staging-*"         # All namespaces starting with "staging-"
+    - "*-backend"         # All namespaces ending with "-backend"
+    - "*"                 # All namespaces
+  excludeNamespaces:
+    - kube-system
+    - "*-test"            # Exclude test namespaces
 ```
 
-### Option 2: Credentials File (OAuth)
+### Watcher Modes
+
+**Autonomous Mode** (default): Detects issues and automatically applies fixes.
+
+```yaml
+watcher:
+  mode: autonomous
+```
+
+**Report Mode**: Detects issues and provides recommendations without making changes.
+
+```yaml
+watcher:
+  mode: report
+  proactiveChecks: true  # Enable proactive checks
+```
+
+## Container Images
+
+Images are published to GitHub Container Registry:
+
+- **Watcher**: `ghcr.io/pmcmanaman/clopus-watcher:latest`
+- **Dashboard**: `ghcr.io/pmcmanaman/clopus-watcher-dashboard:latest`
+
+Tagged releases are also available (e.g., `v0.1.0`, `v0.1`, `v0`).
+
+## Helm Repository
+
+The Helm chart is available from:
+
+**GitHub Pages:**
+```bash
+helm repo add clopus https://pmcmanaman.github.io/clopus-watcher/
+```
+
+**OCI Registry (GHCR):**
+```bash
+helm pull oci://ghcr.io/pmcmanaman/charts/clopus-watcher --version 0.1.0
+```
+
+## Dashboard Features
+
+- Real-time monitoring of watcher runs
+- View detected issues and applied fixes
+- Pod grouping with collapsible sections
+- Run comparison view
+- Export data (CSV/JSON)
+- Dark/light theme
+- Prometheus metrics (`/metrics`)
+- Keyboard shortcuts (press `?` for help)
+
+## Development
+
+### Building Images Locally
 
 ```bash
-# 1. Create namespace
-kubectl create namespace clopus-watcher
+# Build watcher image
+docker build -f Dockerfile.watcher -t clopus-watcher:dev .
 
-# 2. Create secret from credentials file
-kubectl create secret generic claude-credentials \
-  --namespace clopus-watcher \
-  --from-file=credentials.json=$HOME/.claude/.credentials.json
-
-# 3. Edit k8s/cronjob.yaml:
-#    - Set AUTH_MODE=credentials
-#    - Uncomment claude-credentials volume and volumeMount
-
-# 4. Deploy
-./scripts/deploy.sh
+# Build dashboard image
+docker build -f Dockerfile.dashboard -t clopus-watcher-dashboard:dev .
 ```
+
+### Local Development
+
+```bash
+# Dashboard
+cd dashboard
+go run main.go
+
+# Run with local database
+SQLITE_PATH=./watcher.db PORT=8080 go run main.go
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Kubernetes Cluster                       │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   CronJob    │    │  Dashboard   │    │    PVC       │  │
+│  │   (Watcher)  │───▶│  (Web UI)    │◀──▶│  (SQLite)    │  │
+│  └──────────────┘    └──────────────┘    └──────────────┘  │
+│         │                   │                              │
+│         │                   │ /metrics                     │
+│         ▼                   ▼                              │
+│  ┌──────────────┐    ┌──────────────┐                     │
+│  │ Target Pods  │    │  Prometheus  │                     │
+│  │ (monitored)  │    │  (optional)  │                     │
+│  └──────────────┘    └──────────────┘                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## License
+
+[MIT License](LICENSE)

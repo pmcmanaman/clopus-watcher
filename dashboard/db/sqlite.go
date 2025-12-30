@@ -92,6 +92,15 @@ func New(path string) (*DB, error) {
 	// Add run_id column if it doesn't exist (migration for existing DBs)
 	conn.Exec(`ALTER TABLE fixes ADD COLUMN run_id INTEGER`)
 
+	// Create indices for better query performance
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_namespace ON runs(namespace)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_namespace_status ON runs(namespace, status)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_run_id ON fixes(run_id)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_timestamp ON fixes(timestamp DESC)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_namespace ON fixes(namespace)`)
+
 	return &DB{conn: conn}, nil
 }
 
@@ -128,20 +137,41 @@ func (db *DB) CompleteRun(id int64, status string, podCount, errorCount, fixCoun
 }
 
 func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
+	return db.GetRunsPaginated(namespace, limit, 0, "", "")
+}
+
+// GetRunsPaginated returns runs with pagination and optional filters
+func (db *DB) GetRunsPaginated(namespace string, limit, offset int, status, search string) ([]Run, error) {
 	query := `
 		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
 		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, '')
 		FROM runs
+		WHERE 1=1
 	`
 	args := []interface{}{}
 
 	if namespace != "" {
-		query += " WHERE namespace = ?"
+		query += " AND namespace = ?"
 		args = append(args, namespace)
 	}
 
-	query += " ORDER BY started_at DESC LIMIT ?"
-	args = append(args, limit)
+	if status != "" {
+		if status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, status)
+		}
+	}
+
+	if search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := db.conn.Query(query, args...)
 	if err != nil {
@@ -160,6 +190,36 @@ func (db *DB) GetRuns(namespace string, limit int) ([]Run, error) {
 		runs = append(runs, r)
 	}
 	return runs, nil
+}
+
+// CountRuns returns total count of runs matching filters
+func (db *DB) CountRuns(namespace, status, search string) (int, error) {
+	query := "SELECT COUNT(*) FROM runs WHERE 1=1"
+	args := []interface{}{}
+
+	if namespace != "" {
+		query += " AND namespace = ?"
+		args = append(args, namespace)
+	}
+
+	if status != "" {
+		if status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, status)
+		}
+	}
+
+	if search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	var count int
+	err := db.conn.QueryRow(query, args...).Scan(&count)
+	return count, err
 }
 
 func (db *DB) GetRun(id int) (*Run, error) {
@@ -302,4 +362,35 @@ func (db *DB) GetStats() (total, success, failed, pending int, err error) {
 	}
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM fixes WHERE status = 'pending' OR status = 'analyzing'").Scan(&pending)
 	return
+}
+
+// CleanupOldRuns deletes runs and their associated fixes older than the specified number of days
+// Returns the number of deleted runs
+func (db *DB) CleanupOldRuns(retentionDays int) (int64, error) {
+	// First delete fixes associated with old runs
+	_, err := db.conn.Exec(`
+		DELETE FROM fixes WHERE run_id IN (
+			SELECT id FROM runs WHERE started_at < datetime('now', ? || ' days')
+		)
+	`, -retentionDays)
+	if err != nil {
+		return 0, err
+	}
+
+	// Then delete old runs
+	result, err := db.conn.Exec(`
+		DELETE FROM runs WHERE started_at < datetime('now', ? || ' days')
+	`, -retentionDays)
+	if err != nil {
+		return 0, err
+	}
+
+	deleted, _ := result.RowsAffected()
+
+	// Run VACUUM to reclaim space (only if we deleted something)
+	if deleted > 0 {
+		db.conn.Exec(`VACUUM`)
+	}
+
+	return deleted, nil
 }
