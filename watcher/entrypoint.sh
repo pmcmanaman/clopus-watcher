@@ -9,6 +9,10 @@ echo "SQLite path: $SQLITE_PATH"
 WATCHER_MODE="${WATCHER_MODE:-autonomous}"
 echo "Watcher mode: $WATCHER_MODE"
 
+# === PROACTIVE CHECKS ===
+PROACTIVE_CHECKS="${PROACTIVE_CHECKS:-false}"
+echo "Proactive checks: $PROACTIVE_CHECKS"
+
 # === AUTHENTICATION SETUP ===
 AUTH_MODE="${AUTH_MODE:-api-key}"
 echo "Auth mode: $AUTH_MODE"
@@ -91,6 +95,17 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 PROMPT=$(cat "$PROMPT_FILE")
+
+# Append proactive checks if enabled
+if [ "$PROACTIVE_CHECKS" = "true" ]; then
+    PROACTIVE_FILE="/app/proactive-checks.md"
+    if [ -f "$PROACTIVE_FILE" ]; then
+        echo "Adding proactive checks to prompt"
+        PROMPT="$PROMPT
+
+$(cat "$PROACTIVE_FILE")"
+    fi
+fi
 
 # Replace environment variables in prompt
 PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACE|$TARGET_NAMESPACE|g")

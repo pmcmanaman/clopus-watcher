@@ -105,7 +105,7 @@ kubectl describe nodes | grep -A5 "Allocated resources"
 - Node under memory/disk pressure
 - PVC in Pending state
 
-### STEP 5: FOR EACH NEW ISSUE FOUND
+### STEP 5: FOR EACH ISSUE FOUND
 a. Get detailed info:
 ```bash
 kubectl describe pod <pod-name> -n $TARGET_NAMESPACE
@@ -178,7 +178,7 @@ At the end, you MUST output a JSON report in this exact format:
 ```
 
 Status meanings:
-- "ok": No new errors found
+- "ok": No errors found
 - "fixed": Found errors AND successfully fixed them
 - "failed": Found errors but could NOT fix them
 

@@ -105,7 +105,7 @@ kubectl describe nodes | grep -A5 "Allocated resources"
 - Node under memory/disk pressure
 - PVC in Pending state
 
-### STEP 5: FOR EACH NEW ISSUE FOUND
+### STEP 5: FOR EACH ISSUE FOUND
 a. Get detailed info:
 ```bash
 kubectl describe pod <pod-name> -n $TARGET_NAMESPACE
@@ -124,8 +124,8 @@ d. Record to database (with run_id and recommended fix)
 ### STEP 6: ANALYZE AND PROVIDE RECOMMENDATIONS
 For each issue, determine the recommended fix:
 
-| Category | Common Recommendations |
-|----------|------------------------|
+| Issue | Recommendation |
+|-------|----------------|
 | `CrashLoopBackOff` | Check logs for root cause, fix application bug, check resource limits |
 | `OOMKilled` | Increase memory limits in deployment spec |
 | `ImagePullBackOff` | Verify image exists, check registry credentials, fix image tag |
@@ -145,7 +145,7 @@ At the end, you MUST output a JSON report in this exact format:
 ===REPORT_START===
 {
   "pod_count": <number of pods checked>,
-  "error_count": <number of new errors found>,
+  "error_count": <number of errors found>,
   "fix_count": 0,
   "status": "<ok|issues_found>",
   "summary": "<one sentence summary>",
@@ -163,13 +163,13 @@ At the end, you MUST output a JSON report in this exact format:
 ```
 
 Status meanings:
-- "ok": No new errors found
+- "ok": No errors found
 - "issues_found": Found errors that need attention
 
 Severity levels:
-- "critical": Pod is down/crashing, immediate action needed
-- "warning": Errors occurring but pod is functional
-- "info": Minor issues or potential problems
+- "critical": Immediate action needed (pod down, imminent failure)
+- "warning": Should be addressed soon (degraded state)
+- "info": Minor issues
 
 Categories:
 - "application": Code bugs, crashes, exceptions
