@@ -1,0 +1,69 @@
+Clopus Watcher has been installed!
+
+{{- if .Values.namespace.create }}
+Namespace: {{ .Values.namespace.name }}
+{{- else }}
+Namespace: {{ .Release.Namespace }}
+{{- end }}
+
+=== Configuration ===
+Watcher Mode: {{ .Values.watcher.mode }}
+Target Namespace: {{ .Values.watcher.targetNamespace }}
+Schedule: {{ .Values.watcher.schedule }}
+Proactive Checks: {{ .Values.watcher.proactiveChecks }}
+
+{{- if .Values.dashboard.enabled }}
+
+=== Dashboard ===
+{{- if .Values.dashboard.ingress.enabled }}
+Access the dashboard at:
+{{- range $host := .Values.dashboard.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.dashboard.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.dashboard.service.type }}
+Get the dashboard URL:
+  export NODE_PORT=$(kubectl get --namespace {{ include "clopus-watcher.namespace" . }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "clopus-watcher.fullname" . }}-dashboard)
+  export NODE_IP=$(kubectl get nodes --namespace {{ include "clopus-watcher.namespace" . }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "http://$NODE_IP:$NODE_PORT"
+{{- else if contains "LoadBalancer" .Values.dashboard.service.type }}
+Get the dashboard URL:
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  kubectl get --namespace {{ include "clopus-watcher.namespace" . }} svc {{ include "clopus-watcher.fullname" . }}-dashboard -w
+{{- else if contains "ClusterIP" .Values.dashboard.service.type }}
+Access the dashboard via port-forward:
+  kubectl port-forward --namespace {{ include "clopus-watcher.namespace" . }} svc/{{ include "clopus-watcher.fullname" . }}-dashboard 8080:{{ .Values.dashboard.service.port }}
+
+Then open: http://localhost:8080
+{{- end }}
+{{- end }}
+
+=== Manual Trigger ===
+To manually trigger the watcher:
+  kubectl create job --from=cronjob/{{ include "clopus-watcher.fullname" . }} manual-run-$(date +%s) -n {{ include "clopus-watcher.namespace" . }}
+
+=== View Logs ===
+To view watcher job logs:
+  kubectl logs -l app.kubernetes.io/component=watcher -n {{ include "clopus-watcher.namespace" . }} --tail=100
+
+{{- if not .Values.auth.apiKey.value }}
+{{- if not .Values.auth.apiKey.existingSecret }}
+
+=== ACTION REQUIRED ===
+You need to set your Anthropic API key. Either:
+
+1. Upgrade with the API key:
+   helm upgrade {{ .Release.Name }} ./chart --set auth.apiKey.value=sk-ant-your-key
+
+2. Create a secret manually:
+   kubectl create secret generic {{ include "clopus-watcher.authSecretName" . }} \
+     --from-literal={{ .Values.auth.apiKey.secretKey }}=sk-ant-your-key \
+     -n {{ include "clopus-watcher.namespace" . }}
+
+3. Use an existing secret:
+   helm upgrade {{ .Release.Name }} ./chart --set auth.apiKey.existingSecret=your-secret-name
+{{- end }}
+{{- end }}
+
+For more information, visit: https://github.com/pmcmanaman/clopus-watcher

@@ -1,0 +1,107 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "clopus-watcher.fullname" . }}
+  namespace: {{ include "clopus-watcher.namespace" . }}
+  labels:
+    {{- include "clopus-watcher.watcherLabels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.watcher.schedule | quote }}
+  concurrencyPolicy: {{ .Values.watcher.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.watcher.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.watcher.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.watcher.backoffLimit }}
+      ttlSecondsAfterFinished: {{ .Values.watcher.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            {{- include "clopus-watcher.watcherSelectorLabels" . | nindent 12 }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "clopus-watcher.serviceAccountName" . }}
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          initContainers:
+            - name: fix-permissions
+              image: busybox
+              command: ["sh", "-c", "chmod -R 777 /data"]
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+              securityContext:
+                runAsUser: 0
+          containers:
+            - name: watcher
+              image: "{{ .Values.watcher.image.repository }}:{{ .Values.watcher.image.tag }}"
+              imagePullPolicy: {{ .Values.watcher.image.pullPolicy }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                - name: TARGET_NAMESPACE
+                  value: {{ .Values.watcher.targetNamespace | quote }}
+                - name: WATCHER_MODE
+                  value: {{ .Values.watcher.mode | quote }}
+                - name: PROACTIVE_CHECKS
+                  value: {{ .Values.watcher.proactiveChecks | quote }}
+                - name: SQLITE_PATH
+                  value: "/data/watcher.db"
+                - name: HOME
+                  value: "/home/claude"
+                - name: AUTH_MODE
+                  value: {{ .Values.auth.mode | quote }}
+                {{- if eq .Values.auth.mode "api-key" }}
+                - name: ANTHROPIC_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "clopus-watcher.authSecretName" . }}
+                      key: {{ .Values.auth.apiKey.secretKey }}
+                {{- end }}
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                {{- if eq .Values.auth.mode "credentials" }}
+                - name: claude-credentials
+                  mountPath: /secrets
+                  readOnly: true
+                {{- end }}
+              resources:
+                {{- toYaml .Values.watcher.resources | nindent 16 }}
+          volumes:
+            - name: data
+              {{- if .Values.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "clopus-watcher.pvcName" . }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            {{- if eq .Values.auth.mode "credentials" }}
+            - name: claude-credentials
+              secret:
+                secretName: {{ .Values.auth.credentials.existingSecret }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

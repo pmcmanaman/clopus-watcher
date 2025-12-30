@@ -1,0 +1,91 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clopus-watcher.fullname" . }}-dashboard
+  namespace: {{ include "clopus-watcher.namespace" . }}
+  labels:
+    {{- include "clopus-watcher.dashboardLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      {{- include "clopus-watcher.dashboardSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "clopus-watcher.dashboardSelectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dashboard
+          image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+          imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dashboard.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: SQLITE_PATH
+              value: "/data/watcher.db"
+            - name: PORT
+              value: {{ .Values.dashboard.service.targetPort | quote }}
+            - name: LOG_PATH
+              value: "/data/watcher.log"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          {{- if .Values.dashboard.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.dashboard.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.dashboard.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.dashboard.livenessProbe.periodSeconds }}
+          {{- end }}
+          {{- if .Values.dashboard.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.dashboard.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.dashboard.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.dashboard.readinessProbe.periodSeconds }}
+          {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "clopus-watcher.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
