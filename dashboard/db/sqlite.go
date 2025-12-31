@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -79,11 +80,11 @@ type DateRange struct {
 }
 
 type AdvancedFilters struct {
-	Namespace  string
-	Status     string
-	Search     string
-	DateRange  *DateRange
-	PodName    string
+	Namespace string
+	Status    string
+	Search    string
+	DateRange *DateRange
+	PodName   string
 }
 
 type DB struct {
@@ -824,4 +825,185 @@ func (db *DB) CountRunsWithAdvancedFilters(filters AdvancedFilters) (int, error)
 	var count int
 	err := db.conn.QueryRow(query, args...).Scan(&count)
 	return count, err
+}
+
+// Prefiltering statistics and historical data functions
+
+type PrefilterStats struct {
+	ID                 int
+	RunID              int
+	Timestamp          string
+	TotalPods          int
+	FilteredPods       int
+	HighPriorityPods   int
+	CriticalErrorPods  int
+	FinalCount         int
+	NamespaceStats     string // JSON
+	FilterRulesApplied string // JSON
+	EffectivenessScore float64
+}
+
+type PrefilterTrendData struct {
+	Date               string  `json:"date"`
+	TotalPods          int     `json:"total_pods"`
+	FilteredPods       int     `json:"filtered_pods"`
+	FilterEfficiency   float64 `json:"filter_efficiency"`
+	EffectivenessScore float64 `json:"effectiveness_score"`
+}
+
+type PodPriorityData struct {
+	PodName        string  `json:"pod_name"`
+	Namespace      string  `json:"namespace"`
+	Priority       string  `json:"priority"`
+	ErrorCount     int     `json:"error_count"`
+	FixSuccessRate float64 `json:"fix_success_rate"`
+	LastSeen       string  `json:"last_seen"`
+}
+
+// InsertPrefilterStats inserts prefiltering statistics for a run
+func (db *DB) InsertPrefilterStats(stats PrefilterStats) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO prefilter_stats (run_id, timestamp, total_pods, filtered_pods, 
+			high_priority_pods, critical_error_pods, final_count, namespace_stats, 
+			filter_rules_applied, effectiveness_score) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		stats.RunID, stats.Timestamp, stats.TotalPods, stats.FilteredPods,
+		stats.HighPriorityPods, stats.CriticalErrorPods, stats.FinalCount,
+		stats.NamespaceStats, stats.FilterRulesApplied, stats.EffectivenessScore)
+	return err
+}
+
+// GetPrefilterStatsByRun retrieves prefiltering statistics for a specific run
+func (db *DB) GetPrefilterStatsByRun(runID int) (*PrefilterStats, error) {
+	var stats PrefilterStats
+	err := db.conn.QueryRow(`
+		SELECT id, run_id, timestamp, total_pods, filtered_pods, 
+		       high_priority_pods, critical_error_pods, final_count, 
+		       COALESCE(namespace_stats, ''), COALESCE(filter_rules_applied, ''), 
+		       effectiveness_score
+		FROM prefilter_stats 
+		WHERE run_id = ?`, runID).Scan(
+		&stats.ID, &stats.RunID, &stats.Timestamp, &stats.TotalPods, &stats.FilteredPods,
+		&stats.HighPriorityPods, &stats.CriticalErrorPods, &stats.FinalCount,
+		&stats.NamespaceStats, &stats.FilterRulesApplied, &stats.EffectivenessScore)
+
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
+// GetPrefilterTrends returns prefiltering trend data over time
+func (db *DB) GetPrefilterTrends(days int) ([]PrefilterTrendData, error) {
+	rows, err := db.conn.Query(`
+		SELECT DATE(timestamp) as date, 
+		       SUM(total_pods) as total_pods,
+		       SUM(filtered_pods) as filtered_pods,
+		       AVG(CASE WHEN total_pods > 0 THEN CAST(filtered_pods AS REAL) / total_pods ELSE 0 END) as filter_efficiency,
+		       AVG(effectiveness_score) as effectiveness_score
+		FROM prefilter_stats 
+		WHERE timestamp >= datetime('now', '-` + fmt.Sprintf("%d", days) + ` days')
+		GROUP BY DATE(timestamp)
+		ORDER BY date DESC
+		LIMIT 30`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var trends []PrefilterTrendData
+	for rows.Next() {
+		var t PrefilterTrendData
+		err := rows.Scan(&t.Date, &t.TotalPods, &t.FilteredPods, &t.FilterEfficiency, &t.EffectivenessScore)
+		if err != nil {
+			return nil, err
+		}
+		trends = append(trends, t)
+	}
+	return trends, nil
+}
+
+// GetHighPriorityPods returns pods that are frequently flagged as high priority
+func (db *DB) GetHighPriorityPods(limit int) ([]PodPriorityData, error) {
+	rows, err := db.conn.Query(`
+		SELECT DISTINCT 
+		    f.pod_name, 
+		    f.namespace,
+		    CASE WHEN ps.critical_error_pods > 0 THEN 'critical'
+		         WHEN ps.high_priority_pods > 0 THEN 'high'
+		         ELSE 'normal' END as priority,
+		    COUNT(f.id) as error_count,
+		    COALESCE(AGGR.success_rate, 0.0) as fix_success_rate,
+		    MAX(f.timestamp) as last_seen
+		FROM fixes f
+		LEFT JOIN prefilter_stats ps ON f.run_id = ps.run_id
+		LEFT JOIN (
+		    SELECT pod_name, namespace, 
+		           CASE WHEN COUNT(*) > 0 THEN 
+		               CAST(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) 
+		               ELSE 0 END as success_rate
+		    FROM fixes 
+		    WHERE status IN ('success', 'failed')
+		    GROUP BY pod_name, namespace
+		) AGGR ON f.pod_name = AGGR.pod_name AND f.namespace = AGGR.namespace
+		WHERE f.timestamp >= datetime('now', '-7 days')
+		GROUP BY f.pod_name, f.namespace
+		ORDER BY error_count DESC, last_seen DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pods []PodPriorityData
+	for rows.Next() {
+		var p PodPriorityData
+		err := rows.Scan(&p.PodName, &p.Namespace, &p.Priority, &p.ErrorCount,
+			&p.FixSuccessRate, &p.LastSeen)
+		if err != nil {
+			return nil, err
+		}
+		pods = append(pods, p)
+	}
+	return pods, nil
+}
+
+// GetPrefilterEffectiveness calculates the effectiveness of prefiltering rules
+func (db *DB) GetPrefilterEffectiveness(days int) (map[string]float64, error) {
+	rows, err := db.conn.Query(`
+		SELECT 
+		    AVG(effectiveness_score) as overall_effectiveness,
+		    AVG(CASE WHEN total_pods > 0 THEN CAST(filtered_pods AS REAL) / total_pods ELSE 0 END) as filter_ratio,
+		    AVG(CASE WHEN total_pods > 0 THEN CAST(final_count AS REAL) / total_pods ELSE 0 END) as analysis_ratio,
+		    COUNT(*) as total_runs
+		FROM prefilter_stats 
+		WHERE timestamp >= datetime('now', '-` + fmt.Sprintf("%d", days) + ` days')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	effectiveness := make(map[string]float64)
+	if rows.Next() {
+		var overall, filterRatio, analysisRatio float64
+		var totalRuns int
+		err := rows.Scan(&overall, &filterRatio, &analysisRatio, &totalRuns)
+		if err != nil {
+			return nil, err
+		}
+		effectiveness["overall"] = overall
+		effectiveness["filter_ratio"] = filterRatio
+		effectiveness["analysis_ratio"] = analysisRatio
+		effectiveness["total_runs"] = float64(totalRuns)
+	}
+	return effectiveness, nil
+}
+
+// UpdatePrefilterEffectiveness updates the effectiveness score for prefiltering
+func (db *DB) UpdatePrefilterEffectiveness(runID int, score float64) error {
+	_, err := db.conn.Exec(`
+		UPDATE prefilter_stats 
+		SET effectiveness_score = ? 
+		WHERE run_id = ?`, score, runID)
+	return err
 }

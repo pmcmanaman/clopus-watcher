@@ -216,16 +216,17 @@ type FixWithRecommendation struct {
 }
 
 type PageData struct {
-	Namespaces        []db.NamespaceStats
-	CurrentNS         string
-	ShowAllNamespaces bool
-	Runs              []db.Run
-	SelectedRun       *db.Run
-	SelectedFixes     []FixWithRecommendation
-	Stats             *db.NamespaceStats
-	Log               string
-	ReportSummary     string
-	ReportDetails     []ReportDetailWithCommands
+	Namespaces             []db.NamespaceStats
+	CurrentNS              string
+	ShowAllNamespaces      bool
+	Runs                   []db.Run
+	SelectedRun            *db.Run
+	SelectedFixes          []FixWithRecommendation
+	Stats                  *db.NamespaceStats
+	Log                    string
+	ReportSummary          string
+	ReportDetails          []ReportDetailWithCommands
+	PrefilterEffectiveness map[string]float64
 	// Pagination
 	CurrentPage int
 	TotalPages  int
@@ -478,23 +479,32 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get prefiltering effectiveness data
+	var prefilterEffectiveness map[string]float64
+	prefilterEffectiveness, err = h.db.GetPrefilterEffectiveness(7) // Last 7 days
+	if err != nil {
+		log.Printf("Error getting prefiltering effectiveness: %v", err)
+		prefilterEffectiveness = make(map[string]float64)
+	}
+
 	data := PageData{
-		Namespaces:        namespaces,
-		CurrentNS:         namespace,
-		ShowAllNamespaces: namespace == "",
-		Runs:              runs,
-		SelectedRun:       selectedRun,
-		SelectedFixes:     selectedFixes,
-		Stats:             stats,
-		Log:               h.readLog(),
-		ReportSummary:     reportSummary,
-		ReportDetails:     reportDetails,
-		CurrentPage:       page,
-		TotalPages:        totalPages,
-		TotalRuns:         totalRuns,
-		PageSize:          defaultPageSize,
-		StatusFilter:      statusFilter,
-		SearchQuery:       searchQuery,
+		Namespaces:             namespaces,
+		CurrentNS:              namespace,
+		ShowAllNamespaces:      namespace == "",
+		Runs:                   runs,
+		SelectedRun:            selectedRun,
+		SelectedFixes:          selectedFixes,
+		Stats:                  stats,
+		Log:                    h.readLog(),
+		ReportSummary:          reportSummary,
+		PrefilterEffectiveness: prefilterEffectiveness,
+		ReportDetails:          reportDetails,
+		CurrentPage:            page,
+		TotalPages:             totalPages,
+		TotalRuns:              totalRuns,
+		PageSize:               defaultPageSize,
+		StatusFilter:           statusFilter,
+		SearchQuery:            searchQuery,
 	}
 
 	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -2102,5 +2112,105 @@ func (h *Handler) APIListPods(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"pods":      pods,
 		"namespace": namespace,
+	})
+}
+
+// Prefiltering statistics API handlers
+
+// APIPrefilterStats returns prefiltering statistics for a specific run
+func (h *Handler) APIPrefilterStats(w http.ResponseWriter, r *http.Request) {
+	runIDStr := r.URL.Query().Get("run_id")
+	if runIDStr == "" {
+		http.Error(w, "run_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	runID, err := strconv.Atoi(runIDStr)
+	if err != nil {
+		http.Error(w, "Invalid run_id", http.StatusBadRequest)
+		return
+	}
+
+	stats, err := h.db.GetPrefilterStatsByRun(runID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve prefilter stats", http.StatusInternalServerError)
+		return
+	}
+
+	if stats == nil {
+		http.Error(w, "Prefilter stats not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// APIPrefilterTrends returns prefiltering trend data over time
+func (h *Handler) APIPrefilterTrends(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+	days := 7 // default
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+
+	trends, err := h.db.GetPrefilterTrends(days)
+	if err != nil {
+		http.Error(w, "Failed to retrieve prefilter trends", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"trends": trends,
+		"days":   days,
+	})
+}
+
+// APIPrefilterEffectiveness returns prefiltering effectiveness metrics
+func (h *Handler) APIPrefilterEffectiveness(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+	days := 7 // default
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+
+	effectiveness, err := h.db.GetPrefilterEffectiveness(days)
+	if err != nil {
+		http.Error(w, "Failed to retrieve prefilter effectiveness", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"effectiveness": effectiveness,
+		"days":          days,
+	})
+}
+
+// APIHighPriorityPods returns pods that are frequently flagged as high priority
+func (h *Handler) APIHighPriorityPods(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20 // default
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	pods, err := h.db.GetHighPriorityPods(limit)
+	if err != nil {
+		http.Error(w, "Failed to retrieve high priority pods", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"pods":  pods,
+		"limit": limit,
 	})
 }

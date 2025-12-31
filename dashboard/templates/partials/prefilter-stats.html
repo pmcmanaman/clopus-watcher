@@ -1,0 +1,82 @@
+{{define "prefilter-stats.html"}}
+{{if .}}
+<div class="mb-6 p-4 bg-surface-800/50 rounded-lg border border-white/5">
+    <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+        </svg>
+        <h3 class="text-lg font-semibold text-white">Prefiltering Statistics</h3>
+    </div>
+    
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <!-- Total Pods -->
+        <div class="text-center p-3 bg-surface-900/50 rounded-lg">
+            <div class="text-2xl font-bold text-blue-400">{{.TotalPods}}</div>
+            <div class="text-xs text-slate-400">Total Pods</div>
+        </div>
+        
+        <!-- Filtered Pods -->
+        <div class="text-center p-3 bg-surface-900/50 rounded-lg">
+            <div class="text-2xl font-bold text-orange-400">{{.FilteredPods}}</div>
+            <div class="text-xs text-slate-400">Filtered Out</div>
+            <div class="text-xs text-slate-500">{{.FilterEfficiency}}% efficiency</div>
+        </div>
+        
+        <!-- High Priority -->
+        <div class="text-center p-3 bg-surface-900/50 rounded-lg">
+            <div class="text-2xl font-bold text-yellow-400">{{.HighPriorityPods}}</div>
+            <div class="text-xs text-slate-400">High Priority</div>
+        </div>
+        
+        <!-- Critical Errors -->
+        <div class="text-center p-3 bg-surface-900/50 rounded-lg">
+            <div class="text-2xl font-bold text-red-400">{{.CriticalErrorPods}}</div>
+            <div class="text-xs text-slate-400">Critical Errors</div>
+        </div>
+        
+        <!-- Effectiveness Score -->
+        <div class="text-center p-3 bg-surface-900/50 rounded-lg">
+            <div class="text-2xl font-bold text-green-400">{{.EffectivenessScore}}</div>
+            <div class="text-xs text-slate-400">Effectiveness</div>
+        </div>
+    </div>
+    
+    <!-- Prefiltering Trend (mini chart placeholder) -->
+    <div class="mt-4 flex items-center gap-4">
+        <div class="flex-1">
+            <div class="text-xs text-slate-500 mb-1">7-Day Prefiltering Trend</div>
+            <div class="h-8 bg-surface-900/30 rounded flex items-end gap-1" id="prefilter-trend">
+                <!-- This will be populated by JavaScript -->
+            </div>
+        </div>
+        <div class="text-xs text-slate-400">
+            <div>Latest run: {{.FinalCount}} pods analyzed</div>
+            <div>Overall reduction: {{.OverallReduction}}%</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Load prefiltering trend data
+fetch('/api/prefilter/trends?days=7')
+    .then(response => response.json())
+    .then(data => {
+        const trendContainer = document.getElementById('prefilter-trend');
+        if (trendContainer && data.trends && data.trends.length > 0) {
+            trendContainer.innerHTML = '';
+            const maxValue = Math.max(...data.trends.map(t => t.total_pods));
+            
+            data.trends.slice().reverse().forEach(trend => {
+                const bar = document.createElement('div');
+                const height = maxValue > 0 ? (trend.total_pods / maxValue) * 100 : 0;
+                bar.className = 'bg-blue-500/50 hover:bg-blue-500/70 transition-colors flex-1 min-w-[2px]';
+                bar.style.height = height + '%';
+                bar.title = `${trend.date}: ${trend.total_pods} pods, ${(trend.filter_efficiency * 100).toFixed(1)}% filtered`;
+                trendContainer.appendChild(bar);
+            });
+        }
+    })
+    .catch(error => console.log('Failed to load prefiltering trend:', error));
+</script>
+{{end}}
+{{end}}

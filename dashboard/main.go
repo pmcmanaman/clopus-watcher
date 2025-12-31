@@ -245,6 +245,12 @@ func main() {
 	mux.HandleFunc("/api/pods/logs", h.APIPodLogs)
 	mux.HandleFunc("/api/pods/logs/stream", h.APIPodLogsStream)
 
+	// Prefiltering statistics routes
+	mux.HandleFunc("/api/prefilter/stats", h.APIPrefilterStats)
+	mux.HandleFunc("/api/prefilter/trends", h.APIPrefilterTrends)
+	mux.HandleFunc("/api/prefilter/effectiveness", h.APIPrefilterEffectiveness)
+	mux.HandleFunc("/api/prefilter/high-priority-pods", h.APIHighPriorityPods)
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
