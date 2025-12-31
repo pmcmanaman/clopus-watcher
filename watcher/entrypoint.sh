@@ -486,7 +486,9 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 		}
 
 		# Get initial pod data for all target namespaces
-		for ns in $FINAL_NAMESPACES; do
+		# Convert comma-separated namespaces to space-separated for iteration
+		NAMESPACES_LIST=$(echo "$FINAL_NAMESPACES" | tr ',' ' ')
+		for ns in $NAMESPACES_LIST; do
 			log "Analyzing pods in namespace: $ns"
 
 			# Initialize namespace stats
