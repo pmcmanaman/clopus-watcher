@@ -544,8 +544,9 @@ log_step "Extracting report data from output..."
 
 REPORT=""
 if grep -q "===REPORT_START===" "$OUTPUT_FILE" 2>/dev/null; then
-    # Extract report - first get raw content between markers
-    RAW_REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/p' "$OUTPUT_FILE" | grep -v "===REPORT")
+    # Extract report - get ONLY FIRST occurrence between markers
+    # This prevents duplication issues when streaming captures the same content twice
+    RAW_REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/{ /===REPORT_START===/d; /===REPORT_END===/q; p; }' "$OUTPUT_FILE")
 
     # Debug: save raw extracted content
     echo "$RAW_REPORT" > /tmp/debug_raw_report_$RUN_ID.txt
@@ -587,16 +588,17 @@ if [ -n "$REPORT" ]; then
             log_step "Parsing report JSON with jq..."
 
             # Extract values - use jq with error output to debug
-            POD_COUNT=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>&1)
+            # Use head -1 to only take first value in case of duplicates
+            POD_COUNT=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>&1 | head -1)
             log "  .pod_count = '$POD_COUNT'"
 
-            ERROR_COUNT=$(echo "$REPORT" | jq -r '.error_count // 0' 2>&1)
+            ERROR_COUNT=$(echo "$REPORT" | jq -r '.error_count // 0' 2>&1 | head -1)
             log "  .error_count = '$ERROR_COUNT'"
 
-            FIX_COUNT=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>&1)
+            FIX_COUNT=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>&1 | head -1)
             log "  .fix_count = '$FIX_COUNT'"
 
-            STATUS=$(echo "$REPORT" | jq -r '.status // "ok"' 2>&1)
+            STATUS=$(echo "$REPORT" | jq -r '.status // "ok"' 2>&1 | head -1)
             log "  .status = '$STATUS'"
 
             # Validate numeric values (in case jq returned error text)
