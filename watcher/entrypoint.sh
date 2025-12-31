@@ -411,10 +411,14 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 		PREFILTER_TIME_FILTERED=0
 		PREFILTER_PATTERN_FILTERED=0
 		PREFILTER_RESOURCE_FILTERED=0
+		PREFILTER_EMPTY_NAMESPACES=0
 
 		# Track filter rules applied
 		declare -A FILTER_RULES_APPLIED
 		declare -A NAMESPACE_STATS
+
+		# Build filtered namespace list (only namespaces with pods)
+		PREFILTERED_NAMESPACES=""
 
 		log_step "Applying prefiltering rules to namespaces..."
 
@@ -521,6 +525,24 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 			POD_COUNT=$(wc -l <"$PREFILTER_PODS_FILE.$ns" 2>/dev/null | tr -d ' ' || echo "0")
 			PREFILTER_TOTAL_PODS=$((PREFILTER_TOTAL_PODS + POD_COUNT))
 			NS_TOTAL=$POD_COUNT
+
+			# Skip empty namespaces
+			if [ "$POD_COUNT" -eq 0 ]; then
+				log "  Skipping empty namespace: $ns (0 pods)"
+				PREFILTER_EMPTY_NAMESPACES=$((PREFILTER_EMPTY_NAMESPACES + 1))
+				FILTER_RULES_APPLIED["empty_namespace_filter"]=true
+				# Clean up and continue to next namespace
+				rm -f "$PREFILTER_PODS_FILE.$ns" "$PREFILTER_EVENTS_FILE.$ns"
+				rm -rf "$PREFILTER_EVENTS_INDEX.$ns"
+				continue
+			fi
+
+			# Add namespace to filtered list (has pods)
+			if [ -z "$PREFILTERED_NAMESPACES" ]; then
+				PREFILTERED_NAMESPACES="$ns"
+			else
+				PREFILTERED_NAMESPACES="$PREFILTERED_NAMESPACES,$ns"
+			fi
 
 			# Apply pod priority filtering
 			if [ "$POD_PRIORITY_FILTERS" = "true" ]; then
@@ -711,7 +733,10 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 
 		# Generate prefiltering summary
 		FILTERED_COUNT=$(wc -l <"$PREFILTER_STATS_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+		ORIGINAL_NS_COUNT=$(echo "$FINAL_NAMESPACES" | tr ',' '\n' | wc -l | tr -d ' ')
+		FILTERED_NS_COUNT=$(echo "$PREFILTERED_NAMESPACES" | tr ',' '\n' | grep -c . || echo "0")
 		log_success "Prefiltering completed"
+		log "  Namespaces: $FILTERED_NS_COUNT with pods (of $ORIGINAL_NS_COUNT total, $PREFILTER_EMPTY_NAMESPACES empty)"
 		log "  Total pods analyzed: $PREFILTER_TOTAL_PODS"
 		log "  Pods filtered out: $PREFILTER_FILTERED_PODS"
 		log "  High priority pods: $PREFILTER_HIGH_PRIORITY"
@@ -793,7 +818,15 @@ fi
 
 # Replace environment variables in prompt
 log_step "Substituting variables in prompt..."
-PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACES|$FINAL_NAMESPACES|g")
+# Use prefiltered namespaces if available, otherwise use all namespaces
+if [ -n "$PREFILTERED_NAMESPACES" ]; then
+	EFFECTIVE_NAMESPACES="$PREFILTERED_NAMESPACES"
+	log "  Using prefiltered namespaces ($FILTERED_NS_COUNT namespaces with pods)"
+else
+	EFFECTIVE_NAMESPACES="$FINAL_NAMESPACES"
+	log "  Using all namespaces (prefiltering disabled or no filtering applied)"
+fi
+PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACES|$EFFECTIVE_NAMESPACES|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$SQLITE_PATH|$SQLITE_PATH|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$RUN_ID|$RUN_ID|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$LAST_RUN_TIME|$LAST_RUN_TIME|g")
@@ -803,11 +836,11 @@ log_success "Prompt prepared"
 log_section "Claude Code Execution"
 log "Run ID: #$RUN_ID"
 log "Mode: $WATCHER_MODE"
-log "Namespaces: $FINAL_NAMESPACES"
+log "Namespaces: $EFFECTIVE_NAMESPACES"
 
 LOG_FILE="/data/watcher.log"
 echo "=== Run #$RUN_ID started at $(date -Iseconds) ===" >"$LOG_FILE"
-echo "Mode: $WATCHER_MODE | Namespaces: $FINAL_NAMESPACES" >>"$LOG_FILE"
+echo "Mode: $WATCHER_MODE | Namespaces: $EFFECTIVE_NAMESPACES" >>"$LOG_FILE"
 echo "----------------------------------------" >>"$LOG_FILE"
 
 # Capture output
@@ -1102,7 +1135,10 @@ rm -f "$OUTPUT_FILE" "$STREAM_FILE" "$TEXT_FILE" /tmp/debug_raw_report_$RUN_ID.t
 # === FINAL SUMMARY ===
 log_section "Run #$RUN_ID Complete"
 log "Mode: $WATCHER_MODE$([ "$PROACTIVE_CHECKS" = "true" ] && echo " + proactive checks")"
-log "Namespaces: $FINAL_NAMESPACES"
+log "Namespaces analyzed: $EFFECTIVE_NAMESPACES"
+if [ "$PREFILTER_EMPTY_NAMESPACES" -gt 0 ] 2>/dev/null; then
+	log "Namespaces skipped (empty): $PREFILTER_EMPTY_NAMESPACES"
+fi
 log "Status: $STATUS"
 log "Pods monitored: $POD_COUNT"
 log "Errors found: $ERROR_COUNT"
