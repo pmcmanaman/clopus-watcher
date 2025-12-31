@@ -3,10 +3,10 @@ entries:
   clopus-watcher:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.788838386Z"
+    created: "2025-12-31T15:28:17.271304998Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
-    digest: 9f579aaf1c9df2037bb47dd999d8959a7decb274b7c8de83e050117ae1be5cd0
+    digest: 71c5e6104034188eaf73889ff52c305df876967aeef068936ffa3b6c80982a27
     home: https://github.com/pmcmanaman/clopus-watcher
     keywords:
     - kubernetes
@@ -25,7 +25,7 @@ entries:
     version: 0.1.6
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.788138342Z"
+    created: "2025-12-31T15:28:17.270305765Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 8dc1f6ffa395b12480875f9b5aecf10912d3ca654187496ebb7f871a4a700886
@@ -47,7 +47,7 @@ entries:
     version: 0.1.5
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.787475166Z"
+    created: "2025-12-31T15:28:17.269612783Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 0784f5c195f229470fb6c06291c5a4a5d7a3e6b9f7f323033c05e1836bfffbda
@@ -69,7 +69,7 @@ entries:
     version: 0.1.4
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.78678459Z"
+    created: "2025-12-31T15:28:17.268938225Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: f4e10146f35773b1d8402cbeac0ed230366ea2327d6385495104054b196f876f
@@ -91,7 +91,7 @@ entries:
     version: 0.1.3
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.786076471Z"
+    created: "2025-12-31T15:28:17.267856165Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 7c1796b0e1d87e6c075e261ed3d812be51a34d1ad442109d9993ffabbbaabbc2
@@ -113,7 +113,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.785393789Z"
+    created: "2025-12-31T15:28:17.266761995Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 632869f488ddfe3e351d55fae7241e0eafc8758df0f434cb5f3d3a15f8eef4fb
@@ -135,7 +135,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2025-12-31T15:17:34.784695318Z"
+    created: "2025-12-31T15:28:17.266084502Z"
     description: AI-powered Kubernetes pod watcher that monitors, detects issues,
       and optionally applies hotfixes
     digest: 3d7c57d4622c5d3ac216dab5b97b4b13ad5960ea4ae1851625e8f3455b4c61ea
@@ -155,4 +155,4 @@ entries:
     urls:
     - https://pmcmanaman.github.io/clopus-watcher/clopus-watcher-0.1.0.tgz
     version: 0.1.0
-generated: "2025-12-31T15:17:34.783851615Z"
+generated: "2025-12-31T15:28:17.265226512Z"
