@@ -170,6 +170,12 @@ func main() {
 	mux.HandleFunc("/api/runs", h.APIRuns)
 	mux.HandleFunc("/api/run", h.APIRun)
 
+	// Analytics API routes
+	mux.HandleFunc("/api/analytics/error-trend", h.APIErrorTrend)
+	mux.HandleFunc("/api/analytics/fix-rate", h.APIFixRate)
+	mux.HandleFunc("/api/analytics/problematic-pods", h.APIProblematicPods)
+	mux.HandleFunc("/api/analytics/categories", h.APICategoryBreakdown)
+
 	// Export routes
 	mux.HandleFunc("/api/export/runs", h.ExportRuns)
 	mux.HandleFunc("/api/export/fixes", h.ExportFixes)

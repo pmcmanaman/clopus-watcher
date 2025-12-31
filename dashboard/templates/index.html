@@ -6,6 +6,7 @@
     <title>Clopus Watcher</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -263,6 +264,13 @@
                     </svg>
                 </a>
 
+                <!-- Analytics Toggle -->
+                <button onclick="toggleAnalytics()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Analytics">
+                    <svg class="w-4 h-4 text-slate-400 group-hover:text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                </button>
+
                 <!-- Trigger Run Button -->
                 <div class="relative">
                     <button id="trigger-btn" onclick="toggleTriggerMenu()" class="flex items-center gap-2 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 text-accent rounded-lg transition-colors text-sm font-medium">
@@ -368,6 +376,56 @@
                     <button onclick="filterRuns('fixed')" class="filter-btn {{if eq .StatusFilter "fixed"}}active bg-amber-500/10 text-amber-400{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-amber-500/10 hover:text-amber-400 transition-colors" data-filter="fixed">Fixed</button>
                     <button onclick="filterRuns('issues')" class="filter-btn {{if eq .StatusFilter "issues"}}active bg-red-500/10 text-red-400{{end}} flex-1 px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-colors" data-filter="issues">Issues</button>
                 </div>
+
+                <!-- Advanced Filters Toggle -->
+                <button onclick="toggleAdvancedFilters()" class="mt-3 w-full flex items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-300 hover:bg-white/5 rounded-lg transition-colors">
+                    <span class="flex items-center gap-2">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+                        </svg>
+                        Advanced Filters
+                    </span>
+                    <svg id="advanced-filters-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+
+                <!-- Advanced Filters Panel (hidden by default) -->
+                <div id="advanced-filters" class="hidden mt-2 space-y-3 p-3 bg-surface-800/30 rounded-lg border border-white/5">
+                    <!-- Date Range -->
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1.5">Date Range</label>
+                        <div class="flex gap-2">
+                            <input type="date" id="filter-date-start" class="flex-1 bg-surface-800 border border-white/10 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-accent/50" placeholder="Start">
+                            <input type="date" id="filter-date-end" class="flex-1 bg-surface-800 border border-white/10 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-accent/50" placeholder="End">
+                        </div>
+                    </div>
+
+                    <!-- Pod Name Search -->
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1.5">Pod Name</label>
+                        <input type="text" id="filter-pod-name" placeholder="Search by pod name..." class="w-full bg-surface-800 border border-white/10 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-accent/50">
+                    </div>
+
+                    <!-- Category Filter -->
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1.5">Categories</label>
+                        <div class="flex flex-wrap gap-1">
+                            <button onclick="toggleCategoryFilter(this, 'CrashLoopBackOff')" class="category-chip px-2 py-1 text-xs rounded border border-white/10 hover:border-white/20 transition-colors" data-category="CrashLoopBackOff">Crash</button>
+                            <button onclick="toggleCategoryFilter(this, 'OOMKilled')" class="category-chip px-2 py-1 text-xs rounded border border-white/10 hover:border-white/20 transition-colors" data-category="OOMKilled">OOM</button>
+                            <button onclick="toggleCategoryFilter(this, 'ImagePullBackOff')" class="category-chip px-2 py-1 text-xs rounded border border-white/10 hover:border-white/20 transition-colors" data-category="ImagePullBackOff">Image</button>
+                            <button onclick="toggleCategoryFilter(this, 'Pending')" class="category-chip px-2 py-1 text-xs rounded border border-white/10 hover:border-white/20 transition-colors" data-category="Pending">Pending</button>
+                            <button onclick="toggleCategoryFilter(this, 'Error')" class="category-chip px-2 py-1 text-xs rounded border border-white/10 hover:border-white/20 transition-colors" data-category="Error">Error</button>
+                        </div>
+                    </div>
+
+                    <!-- Apply/Clear Buttons -->
+                    <div class="flex gap-2 pt-2">
+                        <button onclick="applyAdvancedFilters()" class="flex-1 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 text-accent text-xs font-medium rounded transition-colors">Apply</button>
+                        <button onclick="clearAdvancedFilters()" class="px-3 py-1.5 hover:bg-white/5 text-slate-400 text-xs rounded transition-colors">Clear</button>
+                    </div>
+                </div>
+
                 <!-- Pagination info -->
                 {{if gt .TotalRuns 0}}
                 <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
@@ -433,6 +491,82 @@
 
         <!-- Main Content -->
         <main class="flex-1 flex flex-col min-w-0 bg-surface-950">
+            <!-- Analytics Panel (hidden by default) -->
+            <div id="analytics-panel" class="hidden border-b border-white/5 bg-surface-900/30">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                            Analytics
+                        </h2>
+                        <div class="flex items-center gap-3">
+                            <select id="analytics-days" onchange="refreshAnalytics()" class="bg-surface-800 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-accent/50">
+                                <option value="7">Last 7 days</option>
+                                <option value="30" selected>Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                            </select>
+                            <button onclick="toggleAnalytics()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors">
+                                <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Charts Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Error Trend Chart -->
+                        <div class="bg-surface-800/50 rounded-xl p-5 border border-white/5">
+                            <h3 class="text-sm font-medium text-slate-300 mb-4">Error Trend</h3>
+                            <div class="h-48">
+                                <canvas id="error-trend-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Fix Success Rate -->
+                        <div class="bg-surface-800/50 rounded-xl p-5 border border-white/5">
+                            <h3 class="text-sm font-medium text-slate-300 mb-4">Fix Success Rate</h3>
+                            <div id="fix-rate-display" class="flex items-center justify-center h-48">
+                                <div class="text-center">
+                                    <div id="fix-rate-value" class="text-5xl font-bold text-accent">--%</div>
+                                    <div class="text-sm text-slate-500 mt-2">
+                                        <span id="fix-rate-success">0</span> successful / <span id="fix-rate-total">0</span> total
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Category Breakdown -->
+                        <div class="bg-surface-800/50 rounded-xl p-5 border border-white/5">
+                            <h3 class="text-sm font-medium text-slate-300 mb-4">Issue Categories</h3>
+                            <div class="h-48">
+                                <canvas id="category-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Problematic Pods Table -->
+                        <div class="bg-surface-800/50 rounded-xl p-5 border border-white/5">
+                            <h3 class="text-sm font-medium text-slate-300 mb-4">Most Problematic Pods</h3>
+                            <div id="problematic-pods-table" class="h-48 overflow-y-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="text-xs text-slate-500 uppercase">
+                                        <tr>
+                                            <th class="text-left pb-2">Pod</th>
+                                            <th class="text-right pb-2">Errors</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="problematic-pods-body" class="text-slate-300">
+                                        <tr><td colspan="2" class="text-center py-4 text-slate-500">Loading...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {{if .SelectedRun}}
             <div id="run-detail" class="flex-1 overflow-y-auto scrollbar-thin">
                 {{template "run-detail.html" (dict "Run" .SelectedRun "Fixes" .SelectedFixes "Stats" .Stats "ReportSummary" .ReportSummary "ReportDetails" .ReportDetails "CurrentNS" .CurrentNS)}}
@@ -676,6 +810,329 @@
             url.searchParams.set('ns', ns);
             // Keep the run parameter if it exists
             // The server will validate if the run is still valid for the new namespace
+            window.location.href = url.toString();
+        }
+
+        // Analytics functionality
+        let errorTrendChart = null;
+        let categoryChart = null;
+        let analyticsLoaded = false;
+
+        function toggleAnalytics() {
+            const panel = document.getElementById('analytics-panel');
+            const isHidden = panel.classList.contains('hidden');
+
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                if (!analyticsLoaded) {
+                    refreshAnalytics();
+                    analyticsLoaded = true;
+                }
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        async function refreshAnalytics() {
+            const days = document.getElementById('analytics-days').value || 30;
+            const ns = new URLSearchParams(window.location.search).get('ns') || '';
+
+            // Fetch all analytics data in parallel
+            const [trendData, rateData, podsData, categoryData] = await Promise.all([
+                fetch(`/api/analytics/error-trend?days=${days}&ns=${encodeURIComponent(ns)}`).then(r => r.json()).catch(() => ({data: []})),
+                fetch(`/api/analytics/fix-rate?days=${days}&ns=${encodeURIComponent(ns)}`).then(r => r.json()).catch(() => ({data: {}})),
+                fetch(`/api/analytics/problematic-pods?days=${days}&ns=${encodeURIComponent(ns)}`).then(r => r.json()).catch(() => ({data: []})),
+                fetch(`/api/analytics/categories?days=${days}&ns=${encodeURIComponent(ns)}`).then(r => r.json()).catch(() => ({data: []}))
+            ]);
+
+            renderErrorTrendChart(trendData.data || []);
+            renderFixRate(rateData.data || {});
+            renderProblematicPods(podsData.data || []);
+            renderCategoryChart(categoryData.data || []);
+        }
+
+        function renderErrorTrendChart(data) {
+            const ctx = document.getElementById('error-trend-chart');
+            if (!ctx) return;
+
+            const labels = data.map(d => d.date);
+            const errors = data.map(d => d.error_count);
+            const fixes = data.map(d => d.fix_count);
+
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#94a3b8' : '#64748b';
+            const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+
+            if (errorTrendChart) {
+                errorTrendChart.destroy();
+            }
+
+            errorTrendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Errors',
+                            data: errors,
+                            borderColor: '#f87171',
+                            backgroundColor: 'rgba(248, 113, 113, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Fixes',
+                            data: fixes,
+                            borderColor: '#34d399',
+                            backgroundColor: 'rgba(52, 211, 153, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: textColor, boxWidth: 12 }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderFixRate(data) {
+            const rate = data.rate || 0;
+            const success = data.success || 0;
+            const total = data.total || 0;
+
+            document.getElementById('fix-rate-value').textContent = rate.toFixed(1) + '%';
+            document.getElementById('fix-rate-success').textContent = success;
+            document.getElementById('fix-rate-total').textContent = total;
+
+            // Color based on rate
+            const valueEl = document.getElementById('fix-rate-value');
+            if (rate >= 80) {
+                valueEl.className = 'text-5xl font-bold text-emerald-400';
+            } else if (rate >= 50) {
+                valueEl.className = 'text-5xl font-bold text-amber-400';
+            } else if (total > 0) {
+                valueEl.className = 'text-5xl font-bold text-red-400';
+            } else {
+                valueEl.className = 'text-5xl font-bold text-slate-500';
+            }
+        }
+
+        function renderProblematicPods(data) {
+            const tbody = document.getElementById('problematic-pods-body');
+            if (!tbody) return;
+
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="text-center py-4 text-slate-500">No issues found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(pod => `
+                <tr class="border-t border-white/5">
+                    <td class="py-2 truncate max-w-[200px]" title="${pod.pod_name}">
+                        <span class="text-xs text-slate-500">${pod.namespace}/</span><br>
+                        <span class="text-slate-300">${pod.pod_name}</span>
+                    </td>
+                    <td class="py-2 text-right">
+                        <span class="px-2 py-1 bg-red-500/10 text-red-400 rounded text-xs font-medium">${pod.error_count}</span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderCategoryChart(data) {
+            const ctx = document.getElementById('category-chart');
+            if (!ctx) return;
+
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#94a3b8' : '#64748b';
+
+            const colors = [
+                '#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa',
+                '#f472b6', '#fb923c', '#2dd4bf', '#818cf8', '#e879f9'
+            ];
+
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+
+            if (!data || data.length === 0) {
+                categoryChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['No Data'],
+                        datasets: [{
+                            data: [1],
+                            backgroundColor: ['#334155']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+                return;
+            }
+
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.map(d => d.category),
+                    datasets: [{
+                        data: data.map(d => d.count),
+                        backgroundColor: colors.slice(0, data.length)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: textColor, boxWidth: 12, font: { size: 11 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Advanced Filters functionality
+        let selectedCategories = [];
+
+        function toggleAdvancedFilters() {
+            const panel = document.getElementById('advanced-filters');
+            const chevron = document.getElementById('advanced-filters-chevron');
+            const isHidden = panel.classList.contains('hidden');
+
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+                // Restore values from URL if present
+                restoreFiltersFromURL();
+            } else {
+                panel.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function restoreFiltersFromURL() {
+            const params = new URLSearchParams(window.location.search);
+
+            // Date range
+            if (params.get('date_start')) {
+                document.getElementById('filter-date-start').value = params.get('date_start');
+            }
+            if (params.get('date_end')) {
+                document.getElementById('filter-date-end').value = params.get('date_end');
+            }
+
+            // Pod name
+            if (params.get('pod')) {
+                document.getElementById('filter-pod-name').value = params.get('pod');
+            }
+
+            // Categories
+            const categories = params.get('category');
+            if (categories) {
+                selectedCategories = categories.split(',');
+                document.querySelectorAll('.category-chip').forEach(chip => {
+                    if (selectedCategories.includes(chip.dataset.category)) {
+                        chip.classList.add('bg-accent/20', 'border-accent/50', 'text-accent');
+                    }
+                });
+            }
+        }
+
+        function toggleCategoryFilter(btn, category) {
+            const idx = selectedCategories.indexOf(category);
+            if (idx >= 0) {
+                selectedCategories.splice(idx, 1);
+                btn.classList.remove('bg-accent/20', 'border-accent/50', 'text-accent');
+            } else {
+                selectedCategories.push(category);
+                btn.classList.add('bg-accent/20', 'border-accent/50', 'text-accent');
+            }
+        }
+
+        function applyAdvancedFilters() {
+            const url = new URL(window.location);
+
+            // Date range
+            const dateStart = document.getElementById('filter-date-start').value;
+            const dateEnd = document.getElementById('filter-date-end').value;
+            if (dateStart) {
+                url.searchParams.set('date_start', dateStart);
+            } else {
+                url.searchParams.delete('date_start');
+            }
+            if (dateEnd) {
+                url.searchParams.set('date_end', dateEnd);
+            } else {
+                url.searchParams.delete('date_end');
+            }
+
+            // Pod name
+            const podName = document.getElementById('filter-pod-name').value.trim();
+            if (podName) {
+                url.searchParams.set('pod', podName);
+            } else {
+                url.searchParams.delete('pod');
+            }
+
+            // Categories
+            if (selectedCategories.length > 0) {
+                url.searchParams.set('category', selectedCategories.join(','));
+            } else {
+                url.searchParams.delete('category');
+            }
+
+            // Reset to page 1
+            url.searchParams.set('page', '1');
+
+            window.location.href = url.toString();
+        }
+
+        function clearAdvancedFilters() {
+            // Clear inputs
+            document.getElementById('filter-date-start').value = '';
+            document.getElementById('filter-date-end').value = '';
+            document.getElementById('filter-pod-name').value = '';
+
+            // Clear category chips
+            selectedCategories = [];
+            document.querySelectorAll('.category-chip').forEach(chip => {
+                chip.classList.remove('bg-accent/20', 'border-accent/50', 'text-accent');
+            });
+
+            // Remove filter params from URL
+            const url = new URL(window.location);
+            url.searchParams.delete('date_start');
+            url.searchParams.delete('date_end');
+            url.searchParams.delete('pod');
+            url.searchParams.delete('category');
+            url.searchParams.set('page', '1');
+
             window.location.href = url.toString();
         }
 

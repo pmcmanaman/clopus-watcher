@@ -302,6 +302,11 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	statusFilter := validateStatus(r.URL.Query().Get("status"))
 	searchQuery := validateSearch(r.URL.Query().Get("q"))
 
+	// Advanced filter parameters
+	dateStart := r.URL.Query().Get("date_start")
+	dateEnd := r.URL.Query().Get("date_end")
+	podName := validateSearch(r.URL.Query().Get("pod"))
+
 	// Validate inputs
 	if !validateNamespace(namespace) {
 		log.Printf("Invalid namespace parameter: %s", namespace)
@@ -324,11 +329,40 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 
 	// Empty namespace means "All Namespaces" - show runs from all namespaces
 
-	// Get total count for pagination
-	totalRuns, err := h.db.CountRuns(namespace, statusFilter, searchQuery)
-	if err != nil {
-		log.Printf("Error counting runs: %v", err)
-		totalRuns = 0
+	// Build advanced filters
+	filters := db.AdvancedFilters{
+		Namespace: namespace,
+		Status:    statusFilter,
+		Search:    searchQuery,
+		PodName:   podName,
+	}
+	if dateStart != "" || dateEnd != "" {
+		filters.DateRange = &db.DateRange{
+			Start: dateStart,
+			End:   dateEnd,
+		}
+	}
+
+	// Check if any advanced filters are active
+	hasAdvancedFilters := dateStart != "" || dateEnd != "" || podName != ""
+
+	var totalRuns int
+	var runs []db.Run
+
+	if hasAdvancedFilters {
+		// Use advanced filter queries
+		totalRuns, err = h.db.CountRunsWithAdvancedFilters(filters)
+		if err != nil {
+			log.Printf("Error counting runs with filters: %v", err)
+			totalRuns = 0
+		}
+	} else {
+		// Use simple queries
+		totalRuns, err = h.db.CountRuns(namespace, statusFilter, searchQuery)
+		if err != nil {
+			log.Printf("Error counting runs: %v", err)
+			totalRuns = 0
+		}
 	}
 
 	totalPages := (totalRuns + defaultPageSize - 1) / defaultPageSize
@@ -340,7 +374,12 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * defaultPageSize
-	runs, err := h.db.GetRunsPaginated(namespace, defaultPageSize, offset, statusFilter, searchQuery)
+
+	if hasAdvancedFilters {
+		runs, err = h.db.GetRunsWithAdvancedFilters(filters, defaultPageSize, offset)
+	} else {
+		runs, err = h.db.GetRunsPaginated(namespace, defaultPageSize, offset, statusFilter, searchQuery)
+	}
 	if err != nil {
 		log.Printf("Error getting runs for namespace %s: %v", namespace, err)
 		runs = []db.Run{}
@@ -710,6 +749,141 @@ func (h *Handler) APIRun(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		log.Printf("Error encoding run JSON: %v", err)
 	}
+}
+
+// Analytics API endpoints
+
+// APIErrorTrend returns daily error counts for charts
+func (h *Handler) APIErrorTrend(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	daysStr := r.URL.Query().Get("days")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	data, err := h.db.GetErrorTrendAggregated(namespace, days)
+	if err != nil {
+		log.Printf("Error getting error trend: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": data,
+		"days": days,
+	})
+}
+
+// APIFixRate returns fix success rate data
+func (h *Handler) APIFixRate(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	daysStr := r.URL.Query().Get("days")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	data, err := h.db.GetFixSuccessRate(namespace, days)
+	if err != nil {
+		log.Printf("Error getting fix success rate: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": data,
+		"days": days,
+	})
+}
+
+// APIProblematicPods returns most problematic pods ranking
+func (h *Handler) APIProblematicPods(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	daysStr := r.URL.Query().Get("days")
+	limitStr := r.URL.Query().Get("limit")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	limit := 10
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 50 {
+			limit = l
+		}
+	}
+
+	data, err := h.db.GetMostProblematicPods(namespace, days, limit)
+	if err != nil {
+		log.Printf("Error getting problematic pods: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":  data,
+		"days":  days,
+		"limit": limit,
+	})
+}
+
+// APICategoryBreakdown returns error category distribution
+func (h *Handler) APICategoryBreakdown(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	daysStr := r.URL.Query().Get("days")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	data, err := h.db.GetCategoryBreakdown(namespace, days)
+	if err != nil {
+		log.Printf("Error getting category breakdown: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": data,
+		"days": days,
+	})
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
