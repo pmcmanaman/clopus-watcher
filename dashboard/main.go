@@ -15,6 +15,7 @@ import (
 	"github.com/kubeden/clopus-watcher/dashboard/db"
 	"github.com/kubeden/clopus-watcher/dashboard/handlers"
 	"github.com/kubeden/clopus-watcher/dashboard/metrics"
+	"github.com/kubeden/clopus-watcher/dashboard/webhooks"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -142,6 +143,9 @@ func main() {
 
 	h := handlers.New(database, tmpl, logPath)
 
+	// Initialize webhooks
+	webhooks.Init()
+
 	// Start metrics updater goroutine
 	go updateMetrics(database)
 
@@ -166,8 +170,15 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("/api/namespaces", h.APINamespaces)
+	mux.HandleFunc("/api/cluster-namespaces", h.APIClusterNamespaces)
 	mux.HandleFunc("/api/runs", h.APIRuns)
 	mux.HandleFunc("/api/run", h.APIRun)
+
+	// Analytics API routes
+	mux.HandleFunc("/api/analytics/error-trend", h.APIErrorTrend)
+	mux.HandleFunc("/api/analytics/fix-rate", h.APIFixRate)
+	mux.HandleFunc("/api/analytics/problematic-pods", h.APIProblematicPods)
+	mux.HandleFunc("/api/analytics/categories", h.APICategoryBreakdown)
 
 	// Export routes
 	mux.HandleFunc("/api/export/runs", h.ExportRuns)
@@ -179,6 +190,10 @@ func main() {
 	// Database management routes
 	mux.HandleFunc("/api/reset", h.ResetDatabase)
 	mux.HandleFunc("/api/run/delete", h.DeleteRun)
+
+	// Webhook routes
+	mux.HandleFunc("/api/webhook/status", h.WebhookStatus)
+	mux.HandleFunc("/api/webhook/test", h.WebhookTest)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

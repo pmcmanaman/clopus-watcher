@@ -36,11 +36,54 @@ type Fix struct {
 }
 
 type NamespaceStats struct {
-	Namespace  string
-	RunCount   int
-	OkCount    int
-	FixedCount int
+	Namespace   string
+	RunCount    int
+	OkCount     int
+	FixedCount  int
 	FailedCount int
+}
+
+// Analytics types
+
+type ErrorTrendData struct {
+	Date       string `json:"date"`
+	Namespace  string `json:"namespace"`
+	ErrorCount int    `json:"error_count"`
+	FixCount   int    `json:"fix_count"`
+}
+
+type FixSuccessRate struct {
+	Total   int     `json:"total"`
+	Success int     `json:"success"`
+	Failed  int     `json:"failed"`
+	Rate    float64 `json:"rate"`
+}
+
+type ProblematicPod struct {
+	PodName    string `json:"pod_name"`
+	Namespace  string `json:"namespace"`
+	ErrorCount int    `json:"error_count"`
+	LastSeen   string `json:"last_seen"`
+}
+
+type CategoryBreakdown struct {
+	Category string `json:"category"`
+	Count    int    `json:"count"`
+}
+
+// Advanced filter types
+
+type DateRange struct {
+	Start string
+	End   string
+}
+
+type AdvancedFilters struct {
+	Namespace  string
+	Status     string
+	Search     string
+	DateRange  *DateRange
+	PodName    string
 }
 
 type DB struct {
@@ -106,6 +149,12 @@ func New(path string) (*DB, error) {
 	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_run_id ON fixes(run_id)`)
 	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_timestamp ON fixes(timestamp DESC)`)
 	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_namespace ON fixes(namespace)`)
+
+	// Analytics indexes
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_started_at_namespace ON runs(started_at, namespace)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_error_type ON fixes(error_type)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_pod_name ON fixes(pod_name)`)
+	conn.Exec(`CREATE INDEX IF NOT EXISTS idx_fixes_namespace_timestamp ON fixes(namespace, timestamp)`)
 
 	return &DB{conn: conn}, nil
 }
@@ -479,4 +528,300 @@ func (db *DB) CleanupOldRuns(retentionDays int) (int64, error) {
 	}
 
 	return deleted, nil
+}
+
+// Analytics query functions
+
+// GetErrorTrend returns daily error/fix counts for the specified time range
+func (db *DB) GetErrorTrend(namespace string, days int) ([]ErrorTrendData, error) {
+	query := `
+		SELECT
+			date(started_at) as date,
+			namespace,
+			SUM(error_count) as error_count,
+			SUM(fix_count) as fix_count
+		FROM runs
+		WHERE started_at >= datetime('now', ? || ' days')
+	`
+	args := []interface{}{-days}
+
+	if namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
+	}
+
+	query += " GROUP BY date(started_at), namespace ORDER BY date ASC"
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var data []ErrorTrendData
+	for rows.Next() {
+		var d ErrorTrendData
+		if err := rows.Scan(&d.Date, &d.Namespace, &d.ErrorCount, &d.FixCount); err != nil {
+			return nil, err
+		}
+		data = append(data, d)
+	}
+	return data, nil
+}
+
+// GetErrorTrendAggregated returns daily totals (not broken down by namespace)
+func (db *DB) GetErrorTrendAggregated(namespace string, days int) ([]ErrorTrendData, error) {
+	query := `
+		SELECT
+			date(started_at) as date,
+			'' as namespace,
+			SUM(error_count) as error_count,
+			SUM(fix_count) as fix_count
+		FROM runs
+		WHERE started_at >= datetime('now', ? || ' days')
+	`
+	args := []interface{}{-days}
+
+	if namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
+	}
+
+	query += " GROUP BY date(started_at) ORDER BY date ASC"
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var data []ErrorTrendData
+	for rows.Next() {
+		var d ErrorTrendData
+		if err := rows.Scan(&d.Date, &d.Namespace, &d.ErrorCount, &d.FixCount); err != nil {
+			return nil, err
+		}
+		data = append(data, d)
+	}
+	return data, nil
+}
+
+// GetFixSuccessRate calculates fix success rate for a time period
+func (db *DB) GetFixSuccessRate(namespace string, days int) (*FixSuccessRate, error) {
+	query := `
+		SELECT
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+		FROM fixes
+		WHERE timestamp >= datetime('now', ? || ' days')
+	`
+	args := []interface{}{-days}
+
+	if namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
+	}
+
+	var rate FixSuccessRate
+	err := db.conn.QueryRow(query, args...).Scan(&rate.Total, &rate.Success, &rate.Failed)
+	if err != nil {
+		return nil, err
+	}
+
+	if rate.Total > 0 {
+		rate.Rate = float64(rate.Success) / float64(rate.Total) * 100
+	}
+
+	return &rate, nil
+}
+
+// GetMostProblematicPods returns pods ranked by error frequency
+func (db *DB) GetMostProblematicPods(namespace string, days, limit int) ([]ProblematicPod, error) {
+	query := `
+		SELECT
+			pod_name,
+			namespace,
+			COUNT(*) as error_count,
+			MAX(timestamp) as last_seen
+		FROM fixes
+		WHERE timestamp >= datetime('now', ? || ' days')
+	`
+	args := []interface{}{-days}
+
+	if namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
+	}
+
+	query += " GROUP BY pod_name, namespace ORDER BY error_count DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pods []ProblematicPod
+	for rows.Next() {
+		var p ProblematicPod
+		if err := rows.Scan(&p.PodName, &p.Namespace, &p.ErrorCount, &p.LastSeen); err != nil {
+			return nil, err
+		}
+		pods = append(pods, p)
+	}
+	return pods, nil
+}
+
+// GetCategoryBreakdown returns error distribution by error_type
+func (db *DB) GetCategoryBreakdown(namespace string, days int) ([]CategoryBreakdown, error) {
+	query := `
+		SELECT
+			error_type as category,
+			COUNT(*) as count
+		FROM fixes
+		WHERE timestamp >= datetime('now', ? || ' days')
+		AND error_type != ''
+	`
+	args := []interface{}{-days}
+
+	if namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, namespace, namespace+",%", "%,"+namespace, "%,"+namespace+",%")
+	}
+
+	query += " GROUP BY error_type ORDER BY count DESC"
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var breakdown []CategoryBreakdown
+	for rows.Next() {
+		var c CategoryBreakdown
+		if err := rows.Scan(&c.Category, &c.Count); err != nil {
+			return nil, err
+		}
+		breakdown = append(breakdown, c)
+	}
+	return breakdown, nil
+}
+
+// GetRunsWithAdvancedFilters returns runs matching all specified filters
+func (db *DB) GetRunsWithAdvancedFilters(filters AdvancedFilters, limit, offset int) ([]Run, error) {
+	query := `
+		SELECT id, started_at, COALESCE(ended_at, ''), namespace, mode, status,
+		       pod_count, error_count, fix_count, COALESCE(report, ''), COALESCE(log, ''),
+		       COALESCE(proactive_checks, 0)
+		FROM runs
+		WHERE 1=1
+	`
+	args := []interface{}{}
+
+	if filters.Namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, filters.Namespace, filters.Namespace+",%", "%,"+filters.Namespace, "%,"+filters.Namespace+",%")
+	}
+
+	if filters.Status != "" {
+		if filters.Status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, filters.Status)
+		}
+	}
+
+	if filters.Search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + filters.Search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	if filters.DateRange != nil {
+		if filters.DateRange.Start != "" {
+			query += " AND started_at >= ?"
+			args = append(args, filters.DateRange.Start)
+		}
+		if filters.DateRange.End != "" {
+			query += " AND started_at <= ?"
+			args = append(args, filters.DateRange.End+" 23:59:59")
+		}
+	}
+
+	if filters.PodName != "" {
+		// Search for runs that have fixes matching this pod name
+		query += " AND id IN (SELECT DISTINCT run_id FROM fixes WHERE pod_name LIKE ?)"
+		args = append(args, "%"+filters.PodName+"%")
+	}
+
+	query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []Run
+	for rows.Next() {
+		var r Run
+		err := rows.Scan(&r.ID, &r.StartedAt, &r.EndedAt, &r.Namespace, &r.Mode,
+			&r.Status, &r.PodCount, &r.ErrorCount, &r.FixCount, &r.Report, &r.Log, &r.ProactiveChecks)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	return runs, nil
+}
+
+// CountRunsWithAdvancedFilters counts runs matching all specified filters
+func (db *DB) CountRunsWithAdvancedFilters(filters AdvancedFilters) (int, error) {
+	query := "SELECT COUNT(*) FROM runs WHERE 1=1"
+	args := []interface{}{}
+
+	if filters.Namespace != "" {
+		query += " AND (namespace = ? OR namespace LIKE ? OR namespace LIKE ? OR namespace LIKE ?)"
+		args = append(args, filters.Namespace, filters.Namespace+",%", "%,"+filters.Namespace, "%,"+filters.Namespace+",%")
+	}
+
+	if filters.Status != "" {
+		if filters.Status == "issues" {
+			query += " AND (status = 'failed' OR status = 'issues_found')"
+		} else {
+			query += " AND status = ?"
+			args = append(args, filters.Status)
+		}
+	}
+
+	if filters.Search != "" {
+		query += " AND (namespace LIKE ? OR report LIKE ?)"
+		searchPattern := "%" + filters.Search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	if filters.DateRange != nil {
+		if filters.DateRange.Start != "" {
+			query += " AND started_at >= ?"
+			args = append(args, filters.DateRange.Start)
+		}
+		if filters.DateRange.End != "" {
+			query += " AND started_at <= ?"
+			args = append(args, filters.DateRange.End+" 23:59:59")
+		}
+	}
+
+	if filters.PodName != "" {
+		query += " AND id IN (SELECT DISTINCT run_id FROM fixes WHERE pod_name LIKE ?)"
+		args = append(args, "%"+filters.PodName+"%")
+	}
+
+	var count int
+	err := db.conn.QueryRow(query, args...).Scan(&count)
+	return count, err
 }
