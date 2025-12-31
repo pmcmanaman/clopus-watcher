@@ -66,26 +66,22 @@ You need to set your Anthropic API key. Either:
    helm upgrade {{ .Release.Name }} ./chart --set auth.apiKey.existingSecret=your-secret-name
 {{- end }}
 {{- end }}
-{{- else if eq .Values.auth.mode "oauth-token" }}
-{{- if not .Values.auth.oauthToken.value }}
-{{- if not .Values.auth.oauthToken.existingSecret }}
+{{- else if eq .Values.auth.mode "credentials" }}
+{{- if not .Values.auth.credentials.existingSecret }}
 
 === ACTION REQUIRED ===
-You need to set your Claude OAuth token. Generate one with: claude /login
+You need to provide Claude credentials. For Claude Pro/subscription:
 
-Then either:
+1. Extract credentials from your local machine:
+   security find-generic-password -s "Claude Code-credentials" -a "YOUR_USERNAME" -w
 
-1. Upgrade with the OAuth token:
-   helm upgrade {{ .Release.Name }} ./chart --set auth.mode=oauth-token --set auth.oauthToken.value=YOUR_TOKEN
-
-2. Create a secret manually:
-   kubectl create secret generic {{ include "clopus-watcher.authSecretName" . }} \
-     --from-literal={{ .Values.auth.oauthToken.secretKey }}=YOUR_TOKEN \
+2. Create a secret with the credentials:
+   kubectl create secret generic claude-credentials \
+     --from-literal=credentials.json='{"claudeAiOauth":{"accessToken":"...","refreshToken":"...","expiresAt":...}}' \
      -n {{ include "clopus-watcher.namespace" . }}
 
-3. Use an existing secret:
-   helm upgrade {{ .Release.Name }} ./chart --set auth.mode=oauth-token --set auth.oauthToken.existingSecret=your-secret-name
-{{- end }}
+3. Upgrade with the secret:
+   helm upgrade {{ .Release.Name }} ./chart --set auth.mode=credentials --set auth.credentials.existingSecret=claude-credentials
 {{- end }}
 {{- end }}
 

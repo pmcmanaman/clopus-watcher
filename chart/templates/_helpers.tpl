@@ -116,18 +116,8 @@ Create the namespace name
 Create the secret name for auth
 */}}
 {{- define "clopus-watcher.authSecretName" -}}
-{{- if eq .Values.auth.mode "api-key" }}
 {{- if .Values.auth.apiKey.existingSecret }}
 {{- .Values.auth.apiKey.existingSecret }}
-{{- else }}
-{{- include "clopus-watcher.fullname" . }}-auth
-{{- end }}
-{{- else if eq .Values.auth.mode "oauth-token" }}
-{{- if .Values.auth.oauthToken.existingSecret }}
-{{- .Values.auth.oauthToken.existingSecret }}
-{{- else }}
-{{- include "clopus-watcher.fullname" . }}-auth
-{{- end }}
 {{- else }}
 {{- include "clopus-watcher.fullname" . }}-auth
 {{- end }}

@@ -1,96 +1,135 @@
 #!/bin/bash
 set -e
 
-echo "=== Clopus Watcher Starting ==="
+# === LOGGING FUNCTIONS ===
+# Timestamp format: 2024-01-15 10:30:45
+timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+log() {
+    echo "[$(timestamp)] $*"
+}
+
+log_section() {
+    echo ""
+    log "═══════════════════════════════════════════════════════════"
+    log "$*"
+    log "═══════════════════════════════════════════════════════════"
+}
+
+log_step() {
+    log "▶ $*"
+}
+
+log_success() {
+    log "✓ $*"
+}
+
+log_warn() {
+    log "⚠ $*"
+}
+
+log_error() {
+    log "✗ $*"
+}
+
+log_section "Clopus Watcher Starting"
 
 # === CONFIGURATION VALIDATION ===
 validate_config() {
     local errors=0
+    log_step "Validating configuration..."
 
     # Validate SQLITE_PATH
     if [ -z "$SQLITE_PATH" ]; then
-        echo "WARNING: SQLITE_PATH not set, using default /data/watcher.db"
+        log_warn "SQLITE_PATH not set, using default /data/watcher.db"
         SQLITE_PATH="/data/watcher.db"
     fi
 
     # Validate SQLITE_PATH directory exists
     SQLITE_DIR=$(dirname "$SQLITE_PATH")
     if [ ! -d "$SQLITE_DIR" ]; then
-        echo "ERROR: SQLite directory does not exist: $SQLITE_DIR"
-        echo "  SQLITE_PATH: $SQLITE_PATH"
-        echo "  Parent directory contents:"
-        ls -la "$(dirname "$SQLITE_DIR")" 2>&1 | sed 's/^/    /' || echo "    (parent directory also missing)"
-        echo "  Tip: Ensure the volume is mounted correctly"
+        log_error "SQLite directory does not exist: $SQLITE_DIR"
+        log "  SQLITE_PATH: $SQLITE_PATH"
+        log "  Parent directory contents:"
+        ls -la "$(dirname "$SQLITE_DIR")" 2>&1 | sed 's/^/    /' || log "    (parent directory also missing)"
+        log "  Tip: Ensure the volume is mounted correctly"
         errors=$((errors + 1))
     elif [ ! -w "$SQLITE_DIR" ]; then
-        echo "ERROR: SQLite directory is not writable: $SQLITE_DIR"
-        echo "  SQLITE_PATH: $SQLITE_PATH"
-        echo "  Directory permissions:"
+        log_error "SQLite directory is not writable: $SQLITE_DIR"
+        log "  SQLITE_PATH: $SQLITE_PATH"
+        log "  Directory permissions:"
         ls -la "$SQLITE_DIR" 2>&1 | head -5 | sed 's/^/    /'
-        echo "  Running as user: $(id)"
-        echo "  Tip: Check volume mount permissions or run with appropriate user"
+        log "  Running as user: $(id)"
+        log "  Tip: Check volume mount permissions or run with appropriate user"
         errors=$((errors + 1))
+    else
+        log_success "SQLite directory exists and is writable: $SQLITE_DIR"
     fi
 
     # Validate kubectl is available
+    log_step "Checking kubectl..."
     if ! command -v kubectl >/dev/null 2>&1; then
-        echo "ERROR: kubectl not found in PATH"
-        echo "  PATH: $PATH"
-        echo "  Tip: Ensure kubectl is installed in the container image"
+        log_error "kubectl not found in PATH"
+        log "  PATH: $PATH"
+        log "  Tip: Ensure kubectl is installed in the container image"
         errors=$((errors + 1))
     else
-        echo "  kubectl version: $(kubectl version --client --short 2>/dev/null || kubectl version --client 2>&1 | head -1)"
+        log_success "kubectl found: $(kubectl version --client --short 2>/dev/null || kubectl version --client 2>&1 | head -1)"
     fi
 
     # Validate kubectl can connect to cluster (only if kubectl exists)
     # Note: We use 'kubectl get --raw /healthz' instead of 'cluster-info' because
     # cluster-info requires listing services in kube-system which the watcher doesn't need
     if command -v kubectl >/dev/null 2>&1; then
+        log_step "Testing cluster connectivity..."
         if ! kubectl get --raw /healthz >/dev/null 2>&1; then
-            echo "ERROR: Cannot connect to Kubernetes cluster"
-            echo "  KUBECONFIG: ${KUBECONFIG:-not set (using default)}"
-            echo "  Current context: $(kubectl config current-context 2>&1 || echo 'none')"
-            echo "  Available contexts: $(kubectl config get-contexts -o name 2>&1 | tr '\n' ', ' | sed 's/,$//')"
-            echo "  Connectivity check error:"
+            log_error "Cannot connect to Kubernetes cluster"
+            log "  KUBECONFIG: ${KUBECONFIG:-not set (using default)}"
+            log "  Current context: $(kubectl config current-context 2>&1 || echo 'none')"
+            log "  Available contexts: $(kubectl config get-contexts -o name 2>&1 | tr '\n' ', ' | sed 's/,$//')"
+            log "  Connectivity check error:"
             kubectl get --raw /healthz 2>&1 | sed 's/^/    /'
             errors=$((errors + 1))
         else
-            echo "  Cluster API: $(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo 'in-cluster')"
+            log_success "Cluster API connected: $(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo 'in-cluster')"
         fi
     fi
 
     # Validate sqlite3 is available
+    log_step "Checking sqlite3..."
     if ! command -v sqlite3 >/dev/null 2>&1; then
-        echo "ERROR: sqlite3 not found in PATH"
-        echo "  PATH: $PATH"
-        echo "  Tip: Install sqlite3 package in the container image"
+        log_error "sqlite3 not found in PATH"
+        log "  PATH: $PATH"
+        log "  Tip: Install sqlite3 package in the container image"
         errors=$((errors + 1))
     else
-        echo "  sqlite3 version: $(sqlite3 --version 2>&1 | head -1)"
+        log_success "sqlite3 found: $(sqlite3 --version 2>&1 | head -1)"
     fi
 
     # Validate claude is available
+    log_step "Checking Claude CLI..."
     if ! command -v claude >/dev/null 2>&1; then
-        echo "ERROR: claude CLI not found in PATH"
-        echo "  PATH: $PATH"
-        echo "  Expected location: $(which claude 2>&1 || echo 'not found')"
-        echo "  Tip: Ensure Claude Code CLI is installed (npm install -g @anthropic-ai/claude-code)"
+        log_error "Claude CLI not found in PATH"
+        log "  PATH: $PATH"
+        log "  Expected location: $(which claude 2>&1 || echo 'not found')"
+        log "  Tip: Ensure Claude Code CLI is installed (npm install -g @anthropic-ai/claude-code)"
         errors=$((errors + 1))
     else
-        echo "  claude version: $(claude --version 2>&1 | head -1)"
+        log_success "Claude CLI found: $(claude --version 2>&1 | head -1)"
     fi
 
     if [ $errors -gt 0 ]; then
-        echo ""
-        echo "=== Configuration validation failed with $errors error(s) ==="
+        log_section "Configuration validation FAILED with $errors error(s)"
         exit 1
     fi
 
-    echo "=== Configuration validation passed ==="
+    log_success "Configuration validation passed"
 }
 
 validate_config
-echo "SQLite path: $SQLITE_PATH"
+log "SQLite path: $SQLITE_PATH"
 
 # === SQL SAFETY FUNCTIONS ===
 # Escape single quotes for SQL strings (prevents SQL injection)
@@ -110,30 +149,34 @@ validate_numeric() {
 }
 
 # === WATCHER MODE ===
+log_section "Configuration"
 WATCHER_MODE="${WATCHER_MODE:-autonomous}"
 # Validate watcher mode
 case "$WATCHER_MODE" in
     autonomous|report) ;;
     *)
-        echo "ERROR: Invalid WATCHER_MODE: $WATCHER_MODE (use 'autonomous' or 'report')"
+        log_error "Invalid WATCHER_MODE: $WATCHER_MODE (use 'autonomous' or 'report')"
         exit 1
         ;;
 esac
-echo "Watcher mode: $WATCHER_MODE"
+log "Watcher mode: $WATCHER_MODE"
 
 # === PROACTIVE CHECKS ===
 PROACTIVE_CHECKS="${PROACTIVE_CHECKS:-false}"
-echo "Proactive checks: $PROACTIVE_CHECKS"
+log "Proactive checks: $PROACTIVE_CHECKS"
 
 # === NAMESPACE RESOLUTION ===
+log_section "Namespace Resolution"
 TARGET_NAMESPACES="${TARGET_NAMESPACES:-default}"
 EXCLUDE_NAMESPACES="${EXCLUDE_NAMESPACES:-kube-system,kube-public,kube-node-lease}"
 
-echo "Target namespace patterns: $TARGET_NAMESPACES"
-echo "Exclude namespace patterns: $EXCLUDE_NAMESPACES"
+log "Target namespace patterns: $TARGET_NAMESPACES"
+log "Exclude namespace patterns: $EXCLUDE_NAMESPACES"
 
 # Get all cluster namespaces
+log_step "Fetching cluster namespaces..."
 ALL_NAMESPACES=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
+log_success "Found $(echo $ALL_NAMESPACES | wc -w | xargs) namespaces in cluster"
 
 # Function to match namespace against pattern (supports * wildcard)
 matches_pattern() {
@@ -187,58 +230,58 @@ done
 
 # Fallback to default if no namespaces resolved
 if [ -z "$FINAL_NAMESPACES" ]; then
-    echo "WARNING: No namespaces matched patterns, falling back to 'default'"
+    log_warn "No namespaces matched patterns, falling back to 'default'"
     FINAL_NAMESPACES="default"
 fi
 
-echo "Resolved namespaces: $FINAL_NAMESPACES"
 NAMESPACE_COUNT=$(echo "$FINAL_NAMESPACES" | tr ',' '\n' | wc -l | xargs)
+log_success "Resolved $NAMESPACE_COUNT namespace(s): $FINAL_NAMESPACES"
 
 # === AUTHENTICATION SETUP ===
+log_section "Authentication"
 AUTH_MODE="${AUTH_MODE:-api-key}"
-echo "Auth mode: $AUTH_MODE"
+log "Auth mode: $AUTH_MODE"
 
 if [ "$AUTH_MODE" = "credentials" ]; then
+    log_step "Checking for credentials file..."
     if [ -f "$HOME/.claude/.credentials.json" ]; then
-        echo "Using mounted credentials.json"
+        log_success "Using mounted credentials.json at $HOME/.claude/.credentials.json"
     elif [ -f /secrets/credentials.json ]; then
-        echo "Copying credentials from /secrets/"
+        log_step "Copying credentials from /secrets/"
         mkdir -p "$HOME/.claude"
         cp /secrets/credentials.json "$HOME/.claude/.credentials.json"
+        log_success "Credentials copied to $HOME/.claude/.credentials.json"
     else
-        echo "ERROR: AUTH_MODE=credentials but no credentials.json found"
-        echo "  Checked locations:"
-        echo "    - $HOME/.claude/.credentials.json"
-        echo "    - /secrets/credentials.json"
-        echo "  Tip: Mount credentials.json via a Secret volume"
+        log_error "AUTH_MODE=credentials but no credentials.json found"
+        log "  Checked locations:"
+        log "    - $HOME/.claude/.credentials.json"
+        log "    - /secrets/credentials.json"
+        log "  Tip: Mount credentials.json via a Secret volume"
+        log "  For Claude Pro/subscription, extract from keychain:"
+        log "    security find-generic-password -s 'Claude Code-credentials' -a 'USERNAME' -w"
         exit 1
     fi
 elif [ "$AUTH_MODE" = "api-key" ]; then
+    log_step "Checking for API key..."
     if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo "ERROR: AUTH_MODE=api-key but ANTHROPIC_API_KEY not set"
-        echo "  Tip: Set ANTHROPIC_API_KEY environment variable via Secret"
-        echo "  Example: kubectl create secret generic anthropic-api-key --from-literal=ANTHROPIC_API_KEY=sk-..."
+        log_error "AUTH_MODE=api-key but ANTHROPIC_API_KEY not set"
+        log "  Tip: Set ANTHROPIC_API_KEY environment variable via Secret"
+        log "  Example: kubectl create secret generic anthropic-api-key --from-literal=ANTHROPIC_API_KEY=sk-..."
         exit 1
     fi
-    echo "Using API key authentication"
-elif [ "$AUTH_MODE" = "oauth-token" ]; then
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-        echo "ERROR: AUTH_MODE=oauth-token but CLAUDE_CODE_OAUTH_TOKEN not set"
-        echo "  Tip: Generate a token with 'claude /login' and set CLAUDE_CODE_OAUTH_TOKEN"
-        echo "  Example: kubectl create secret generic claude-oauth --from-literal=oauth-token=YOUR_TOKEN"
-        exit 1
-    fi
-    echo "Using OAuth token authentication"
+    log_success "API key authentication configured (key length: ${#ANTHROPIC_API_KEY} chars)"
 else
-    echo "ERROR: Invalid AUTH_MODE: $AUTH_MODE (use 'api-key', 'oauth-token', or 'credentials')"
-    echo "  Valid options:"
-    echo "    - api-key: Use ANTHROPIC_API_KEY environment variable"
-    echo "    - oauth-token: Use CLAUDE_CODE_OAUTH_TOKEN environment variable"
-    echo "    - credentials: Use mounted credentials.json file"
+    log_error "Invalid AUTH_MODE: $AUTH_MODE (use 'api-key' or 'credentials')"
+    log "  Valid options:"
+    log "    - api-key: Use ANTHROPIC_API_KEY environment variable"
+    log "    - credentials: Use mounted credentials.json file (for Claude Pro/subscription)"
     exit 1
 fi
 
 # === DATABASE SETUP ===
+log_section "Database Setup"
+log_step "Initializing database tables..."
+
 # Ensure tables exist
 sqlite3 "$SQLITE_PATH" "CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -270,58 +313,74 @@ sqlite3 "$SQLITE_PATH" "CREATE TABLE IF NOT EXISTS fixes (
 # Add run_id column if missing (migration)
 sqlite3 "$SQLITE_PATH" "ALTER TABLE fixes ADD COLUMN run_id INTEGER;" 2>/dev/null || true
 
-echo "Database initialized"
+log_success "Database initialized at $SQLITE_PATH"
 
 # === CREATE RUN RECORD ===
+log_step "Creating run record..."
 ESCAPED_NAMESPACES=$(sql_escape "$FINAL_NAMESPACES")
 ESCAPED_MODE=$(sql_escape "$WATCHER_MODE")
 RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$ESCAPED_NAMESPACES', '$ESCAPED_MODE', 'running'); SELECT last_insert_rowid();")
 RUN_ID=$(validate_numeric "$RUN_ID" "0")
 if [ "$RUN_ID" = "0" ]; then
-    echo "ERROR: Failed to create run record"
+    log_error "Failed to create run record"
     exit 1
 fi
-echo "Created run #$RUN_ID"
+log_success "Created run #$RUN_ID"
 
 # === GET LAST RUN TIME ===
 # Get last run time across any of the target namespaces
 LAST_RUN_TIME=$(sqlite3 "$SQLITE_PATH" "SELECT COALESCE(MAX(ended_at), '') FROM runs WHERE status != 'running' AND id != $RUN_ID;")
-echo "Last run time: ${LAST_RUN_TIME:-'(first run)'}"
-
-# === SELECT PROMPT ===
-if [ "$WATCHER_MODE" = "report" ]; then
-    PROMPT_FILE="/app/master-prompt-report.md"
+if [ -n "$LAST_RUN_TIME" ]; then
+    log "Last run completed: $LAST_RUN_TIME"
 else
-    PROMPT_FILE="/app/master-prompt-autonomous.md"
+    log "This is the first run"
 fi
 
+# === SELECT PROMPT ===
+log_section "Prompt Setup"
+if [ "$WATCHER_MODE" = "report" ]; then
+    PROMPT_FILE="/app/master-prompt-report.md"
+    log "Mode: report (detect and recommend only)"
+else
+    PROMPT_FILE="/app/master-prompt-autonomous.md"
+    log "Mode: autonomous (detect and fix)"
+fi
+
+log_step "Loading prompt from $PROMPT_FILE..."
 if [ ! -f "$PROMPT_FILE" ]; then
-    echo "ERROR: Prompt file not found: $PROMPT_FILE"
+    log_error "Prompt file not found: $PROMPT_FILE"
     sqlite3 "$SQLITE_PATH" "UPDATE runs SET ended_at = datetime('now'), status = 'failed', report = 'Prompt file not found' WHERE id = $(validate_numeric $RUN_ID);"
     exit 1
 fi
 
 PROMPT=$(cat "$PROMPT_FILE")
+log_success "Prompt loaded ($(echo "$PROMPT" | wc -c | xargs) bytes)"
 
 # Append proactive checks if enabled
 if [ "$PROACTIVE_CHECKS" = "true" ]; then
     PROACTIVE_FILE="/app/proactive-checks.md"
     if [ -f "$PROACTIVE_FILE" ]; then
-        echo "Adding proactive checks to prompt"
+        log_step "Adding proactive checks to prompt..."
         PROMPT="$PROMPT
 
 $(cat "$PROACTIVE_FILE")"
+        log_success "Proactive checks appended"
     fi
 fi
 
 # Replace environment variables in prompt
+log_step "Substituting variables in prompt..."
 PROMPT=$(echo "$PROMPT" | sed "s|\$TARGET_NAMESPACES|$FINAL_NAMESPACES|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$SQLITE_PATH|$SQLITE_PATH|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$RUN_ID|$RUN_ID|g")
 PROMPT=$(echo "$PROMPT" | sed "s|\$LAST_RUN_TIME|$LAST_RUN_TIME|g")
+log_success "Prompt prepared"
 
 # === RUN CLAUDE ===
-echo "Starting Claude Code..."
+log_section "Claude Code Execution"
+log "Run ID: #$RUN_ID"
+log "Mode: $WATCHER_MODE"
+log "Namespaces: $FINAL_NAMESPACES"
 
 LOG_FILE="/data/watcher.log"
 echo "=== Run #$RUN_ID started at $(date -Iseconds) ===" > "$LOG_FILE"
@@ -330,15 +389,41 @@ echo "----------------------------------------" >> "$LOG_FILE"
 
 # Capture output
 OUTPUT_FILE="/tmp/claude_output_$RUN_ID.txt"
-claude --dangerously-skip-permissions --verbose -p "$PROMPT" 2>&1 | tee -a "$LOG_FILE" | tee "$OUTPUT_FILE"
+log_step "Starting Claude Code (this may take several minutes)..."
+log "Claude is analyzing pods, checking logs, and $( [ "$WATCHER_MODE" = "autonomous" ] && echo "applying fixes" || echo "generating recommendations")..."
+log ""
+log "─────────────────────────────────────────────────────────────"
+log "                    CLAUDE CODE OUTPUT                        "
+log "─────────────────────────────────────────────────────────────"
 
-echo "=== Run #$RUN_ID Complete ===" | tee -a "$LOG_FILE"
+# Force unbuffered output for real-time streaming
+# stdbuf forces line-buffered stdout, script forces pseudo-tty for full streaming
+export PYTHONUNBUFFERED=1
+export NODE_NO_WARNINGS=1
+
+# Stream output to log file and capture with forced line buffering
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL claude --dangerously-skip-permissions --verbose -p "$PROMPT" 2>&1 | stdbuf -oL tee -a "$LOG_FILE" | stdbuf -oL tee "$OUTPUT_FILE"
+else
+    # Fallback without stdbuf
+    claude --dangerously-skip-permissions --verbose -p "$PROMPT" 2>&1 | tee -a "$LOG_FILE" | tee "$OUTPUT_FILE"
+fi
+
+log "─────────────────────────────────────────────────────────────"
+
+echo ""
+log_success "Claude Code execution completed"
 
 # === PARSE REPORT ===
+log_section "Report Parsing"
+log_step "Extracting report data from output..."
+
 REPORT=""
 if grep -q "===REPORT_START===" "$OUTPUT_FILE" 2>/dev/null; then
     REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/p' "$OUTPUT_FILE" | grep -v "===REPORT" | tr -d '\n' | tr -s ' ')
-    echo "Parsed report: $REPORT"
+    log_success "Found structured report"
+else
+    log_warn "No structured report markers found in output"
 fi
 
 # Extract values from report with defaults
@@ -352,7 +437,7 @@ if [ -n "$REPORT" ]; then
     if command -v jq >/dev/null 2>&1; then
         # Use jq for robust JSON parsing
         if echo "$REPORT" | jq empty 2>/dev/null; then
-            echo "Report JSON is valid, parsing with jq"
+            log_step "Parsing report JSON with jq..."
             PARSED=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>/dev/null)
             [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && POD_COUNT=$PARSED
 
@@ -364,12 +449,13 @@ if [ -n "$REPORT" ]; then
 
             PARSED=$(echo "$REPORT" | jq -r '.status // "ok"' 2>/dev/null)
             [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && STATUS=$PARSED
+            log_success "Report parsed successfully"
         else
-            echo "WARNING: Report JSON is invalid, skipping parse"
+            log_warn "Report JSON is invalid, skipping parse"
         fi
     else
         # Fallback to grep/sed parsing (less robust)
-        echo "jq not available, using grep/sed fallback"
+        log_step "Parsing report with grep/sed (jq not available)..."
 
         # Parse pod_count
         PARSED=$(echo "$REPORT" | grep -o '"pod_count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
@@ -386,6 +472,7 @@ if [ -n "$REPORT" ]; then
         # Parse status
         PARSED=$(echo "$REPORT" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
         [ -n "$PARSED" ] && STATUS=$PARSED
+        log_success "Report parsed with fallback method"
     fi
 fi
 
@@ -400,9 +487,13 @@ POD_COUNT=$(validate_numeric "$POD_COUNT" "0")
 ERROR_COUNT=$(validate_numeric "$ERROR_COUNT" "0")
 FIX_COUNT=$(validate_numeric "$FIX_COUNT" "0")
 
-echo "Final values: pods=$POD_COUNT errors=$ERROR_COUNT fixes=$FIX_COUNT status=$STATUS"
+log "Pods monitored: $POD_COUNT"
+log "Errors found: $ERROR_COUNT"
+log "Fixes applied: $FIX_COUNT"
+log "Status: $STATUS"
 
 # Read full log (limit size to prevent issues) and escape for SQL
+log_step "Saving log to database..."
 FULL_LOG=$(head -c 100000 "$LOG_FILE")
 FULL_LOG_ESCAPED=$(sql_escape "$FULL_LOG")
 
@@ -413,6 +504,7 @@ REPORT_ESCAPED=$(sql_escape "$REPORT")
 STATUS_ESCAPED=$(sql_escape "$STATUS")
 
 # === UPDATE RUN RECORD ===
+log_step "Updating run record #$RUN_ID..."
 sqlite3 "$SQLITE_PATH" "UPDATE runs SET
     ended_at = datetime('now'),
     status = '$STATUS_ESCAPED',
@@ -423,7 +515,21 @@ sqlite3 "$SQLITE_PATH" "UPDATE runs SET
     log = '$FULL_LOG_ESCAPED'
 WHERE id = $(validate_numeric $RUN_ID);"
 
-echo "Run #$RUN_ID completed with status: $STATUS"
+log_success "Run record updated"
 
 # Cleanup
 rm -f "$OUTPUT_FILE"
+
+# === FINAL SUMMARY ===
+log_section "Run #$RUN_ID Complete"
+log "Status: $STATUS"
+log "Pods monitored: $POD_COUNT"
+log "Errors found: $ERROR_COUNT"
+log "Fixes applied: $FIX_COUNT"
+if [ "$ERROR_COUNT" -gt 0 ] && [ "$WATCHER_MODE" = "report" ]; then
+    log_warn "Issues were found. Check the dashboard for details."
+elif [ "$FIX_COUNT" -gt 0 ]; then
+    log_success "Fixes were applied. Check the dashboard for details."
+else
+    log_success "No issues found - all pods healthy!"
+fi
