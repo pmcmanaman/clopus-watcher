@@ -163,7 +163,11 @@ log "Watcher mode: $WATCHER_MODE"
 
 # === PROACTIVE CHECKS ===
 PROACTIVE_CHECKS="${PROACTIVE_CHECKS:-false}"
-log "Proactive checks: $PROACTIVE_CHECKS"
+if [ "$PROACTIVE_CHECKS" = "true" ]; then
+    log_success "Proactive checks: ENABLED (will scan for potential issues)"
+else
+    log "Proactive checks: disabled"
+fi
 
 # === NAMESPACE RESOLUTION ===
 log_section "Namespace Resolution"
@@ -293,6 +297,7 @@ sqlite3 "$SQLITE_PATH" "CREATE TABLE IF NOT EXISTS runs (
     pod_count INTEGER DEFAULT 0,
     error_count INTEGER DEFAULT 0,
     fix_count INTEGER DEFAULT 0,
+    proactive_checks INTEGER DEFAULT 0,
     report TEXT,
     log TEXT
 );"
@@ -310,8 +315,9 @@ sqlite3 "$SQLITE_PATH" "CREATE TABLE IF NOT EXISTS fixes (
     FOREIGN KEY (run_id) REFERENCES runs(id)
 );"
 
-# Add run_id column if missing (migration)
+# Add columns if missing (migrations for existing DBs)
 sqlite3 "$SQLITE_PATH" "ALTER TABLE fixes ADD COLUMN run_id INTEGER;" 2>/dev/null || true
+sqlite3 "$SQLITE_PATH" "ALTER TABLE runs ADD COLUMN proactive_checks INTEGER DEFAULT 0;" 2>/dev/null || true
 
 log_success "Database initialized at $SQLITE_PATH"
 
@@ -319,7 +325,8 @@ log_success "Database initialized at $SQLITE_PATH"
 log_step "Creating run record..."
 ESCAPED_NAMESPACES=$(sql_escape "$FINAL_NAMESPACES")
 ESCAPED_MODE=$(sql_escape "$WATCHER_MODE")
-RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status) VALUES (datetime('now'), '$ESCAPED_NAMESPACES', '$ESCAPED_MODE', 'running'); SELECT last_insert_rowid();")
+PROACTIVE_VALUE=$( [ "$PROACTIVE_CHECKS" = "true" ] && echo "1" || echo "0" )
+RUN_ID=$(sqlite3 "$SQLITE_PATH" "INSERT INTO runs (started_at, namespace, mode, status, proactive_checks) VALUES (datetime('now'), '$ESCAPED_NAMESPACES', '$ESCAPED_MODE', 'running', $PROACTIVE_VALUE); SELECT last_insert_rowid();")
 RUN_ID=$(validate_numeric "$RUN_ID" "0")
 if [ "$RUN_ID" = "0" ]; then
     log_error "Failed to create run record"
@@ -397,16 +404,125 @@ log "                    CLAUDE CODE OUTPUT                        "
 log "─────────────────────────────────────────────────────────────"
 
 # Force unbuffered output for real-time streaming
-# stdbuf forces line-buffered stdout, script forces pseudo-tty for full streaming
 export PYTHONUNBUFFERED=1
 export NODE_NO_WARNINGS=1
 
-# Stream output to log file and capture with forced line buffering
-if command -v stdbuf >/dev/null 2>&1; then
-    stdbuf -oL -eL claude --dangerously-skip-permissions --verbose -p "$PROMPT" 2>&1 | stdbuf -oL tee -a "$LOG_FILE" | stdbuf -oL tee "$OUTPUT_FILE"
-else
-    # Fallback without stdbuf
-    claude --dangerously-skip-permissions --verbose -p "$PROMPT" 2>&1 | tee -a "$LOG_FILE" | tee "$OUTPUT_FILE"
+# Use stream-json format to see tool calls in real-time
+# Parse the JSON stream and display human-readable output with timestamps
+STREAM_FILE="/tmp/claude_stream_$RUN_ID.jsonl"
+ACCUMULATED_TEXT=""
+
+claude --dangerously-skip-permissions --output-format stream-json --verbose -p "$PROMPT" 2>&1 | while IFS= read -r line; do
+    # Save raw stream for debugging
+    echo "$line" >> "$STREAM_FILE"
+
+    # Skip empty lines
+    [ -z "$line" ] && continue
+
+    # Try to parse JSON
+    if echo "$line" | jq -e '.' >/dev/null 2>&1; then
+        MSG_TYPE=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
+
+        case "$MSG_TYPE" in
+            "system")
+                # System messages (e.g., initialization)
+                SUBTYPE=$(echo "$line" | jq -r '.subtype // empty' 2>/dev/null)
+                [ "$SUBTYPE" = "init" ] && log "Claude initialized"
+                ;;
+
+            "assistant")
+                # Check for tool_use in content array
+                TOOLS=$(echo "$line" | jq -r '.message.content[]? | select(.type == "tool_use") | .name' 2>/dev/null)
+                for TOOL in $TOOLS; do
+                    log_step "▶ Tool call: $TOOL"
+                    # Extract and show relevant input based on tool type
+                    INPUT=$(echo "$line" | jq -r ".message.content[] | select(.type == \"tool_use\" and .name == \"$TOOL\") | .input" 2>/dev/null)
+                    case "$TOOL" in
+                        Bash)
+                            CMD=$(echo "$INPUT" | jq -r '.command // empty' 2>/dev/null | head -c 150)
+                            [ -n "$CMD" ] && log "    $ $CMD"
+                            ;;
+                        Read)
+                            FILE=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null)
+                            [ -n "$FILE" ] && log "    Reading: $FILE"
+                            ;;
+                        Edit)
+                            FILE=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null)
+                            [ -n "$FILE" ] && log "    Editing: $FILE"
+                            ;;
+                        Write)
+                            FILE=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null)
+                            [ -n "$FILE" ] && log "    Writing: $FILE"
+                            ;;
+                        Grep)
+                            PATTERN=$(echo "$INPUT" | jq -r '.pattern // empty' 2>/dev/null)
+                            [ -n "$PATTERN" ] && log "    Searching: $PATTERN"
+                            ;;
+                        Glob)
+                            PATTERN=$(echo "$INPUT" | jq -r '.pattern // empty' 2>/dev/null)
+                            [ -n "$PATTERN" ] && log "    Finding: $PATTERN"
+                            ;;
+                        *)
+                            log "    (executing...)"
+                            ;;
+                    esac
+                done
+                ;;
+
+            "user")
+                # Tool results coming back
+                TOOL_RESULTS=$(echo "$line" | jq -r '.message.content[]? | select(.type == "tool_result") | .tool_use_id' 2>/dev/null | wc -l)
+                [ "$TOOL_RESULTS" -gt 0 ] && log "    ✓ Tool completed"
+                ;;
+
+            "content_block_start")
+                BLOCK_TYPE=$(echo "$line" | jq -r '.content_block.type // empty' 2>/dev/null)
+                if [ "$BLOCK_TYPE" = "tool_use" ]; then
+                    TOOL_NAME=$(echo "$line" | jq -r '.content_block.name // empty' 2>/dev/null)
+                    [ -n "$TOOL_NAME" ] && log_step "▶ Calling: $TOOL_NAME"
+                elif [ "$BLOCK_TYPE" = "text" ]; then
+                    log "  Claude is thinking..."
+                fi
+                ;;
+
+            "content_block_delta")
+                DELTA_TYPE=$(echo "$line" | jq -r '.delta.type // empty' 2>/dev/null)
+                if [ "$DELTA_TYPE" = "text_delta" ]; then
+                    TEXT=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
+                    # Stream text output (Claude's response)
+                    [ -n "$TEXT" ] && printf "%s" "$TEXT"
+                fi
+                ;;
+
+            "content_block_stop")
+                # End of a content block - add newline if we were streaming text
+                echo ""
+                ;;
+
+            "result")
+                # Final result
+                log_success "Claude finished processing"
+                RESULT=$(echo "$line" | jq -r '.result // empty' 2>/dev/null)
+                [ -n "$RESULT" ] && [ "$RESULT" != "null" ] && echo "$RESULT"
+                # Save result for report parsing
+                echo "$RESULT" >> "$OUTPUT_FILE"
+                ;;
+
+            "error")
+                ERROR_MSG=$(echo "$line" | jq -r '.error.message // .error // "Unknown error"' 2>/dev/null)
+                log_error "Error: $ERROR_MSG"
+                ;;
+        esac
+    else
+        # Not valid JSON - might be stderr output, show as-is
+        [ -n "$line" ] && echo "$line"
+    fi
+done 2>&1 | tee -a "$LOG_FILE"
+
+# If stream file exists, also check for report markers in the result
+if [ -f "$STREAM_FILE" ]; then
+    # Extract final result text for report parsing
+    jq -r 'select(.type == "result") | .result // empty' "$STREAM_FILE" >> "$OUTPUT_FILE" 2>/dev/null || true
 fi
 
 log "─────────────────────────────────────────────────────────────"
@@ -518,10 +634,12 @@ WHERE id = $(validate_numeric $RUN_ID);"
 log_success "Run record updated"
 
 # Cleanup
-rm -f "$OUTPUT_FILE"
+rm -f "$OUTPUT_FILE" "$STREAM_FILE"
 
 # === FINAL SUMMARY ===
 log_section "Run #$RUN_ID Complete"
+log "Mode: $WATCHER_MODE$( [ "$PROACTIVE_CHECKS" = "true" ] && echo " + proactive checks" )"
+log "Namespaces: $FINAL_NAMESPACES"
 log "Status: $STATUS"
 log "Pods monitored: $POD_COUNT"
 log "Errors found: $ERROR_COUNT"
