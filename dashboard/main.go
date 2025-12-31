@@ -166,6 +166,7 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("/api/namespaces", h.APINamespaces)
+	mux.HandleFunc("/api/cluster-namespaces", h.APIClusterNamespaces)
 	mux.HandleFunc("/api/runs", h.APIRuns)
 	mux.HandleFunc("/api/run", h.APIRun)
 

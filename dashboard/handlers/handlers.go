@@ -608,6 +608,54 @@ func (h *Handler) APINamespaces(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(namespaces)
 }
 
+// APIClusterNamespaces returns all namespaces from the Kubernetes cluster
+func (h *Handler) APIClusterNamespaces(w http.ResponseWriter, r *http.Request) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		// Fall back to returning an error - likely running outside cluster
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      "Not running in cluster",
+			"namespaces": []string{},
+		})
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      fmt.Sprintf("Failed to create k8s client: %v", err),
+			"namespaces": []string{},
+		})
+		return
+	}
+
+	ctx := context.Background()
+	nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      fmt.Sprintf("Failed to list namespaces: %v", err),
+			"namespaces": []string{},
+		})
+		return
+	}
+
+	namespaces := make([]string, 0, len(nsList.Items))
+	for _, ns := range nsList.Items {
+		namespaces = append(namespaces, ns.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"namespaces": namespaces,
+	})
+}
+
 func (h *Handler) APIRuns(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("ns")
 

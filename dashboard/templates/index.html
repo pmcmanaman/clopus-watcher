@@ -275,9 +275,12 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </button>
-                    <div id="trigger-menu" class="hidden absolute right-0 mt-2 w-56 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
-                        <div id="trigger-namespace-hint" class="px-4 py-2 text-xs text-slate-400 border-b border-white/5 bg-white/[0.02]">
-                            Target: <span id="trigger-namespace-label" class="text-slate-300">All configured namespaces</span>
+                    <div id="trigger-menu" class="hidden absolute right-0 mt-2 w-64 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div class="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                            <label class="block text-xs text-slate-400 mb-1.5">Target Namespace</label>
+                            <select id="trigger-namespace-select" class="w-full bg-surface-700 border border-white/10 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-accent/50">
+                                <option value="">All configured namespaces</option>
+                            </select>
                         </div>
                         <button onclick="triggerRun('report')" class="w-full px-4 py-3 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
                             <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -626,16 +629,45 @@
         });
 
         // Trigger menu toggle
-        function toggleTriggerMenu() {
+        let clusterNamespacesLoaded = false;
+
+        async function toggleTriggerMenu() {
             const menu = document.getElementById('trigger-menu');
-            // Update the namespace hint when opening the menu
-            const nsSelector = document.getElementById('namespace-filter');
-            const nsLabel = document.getElementById('trigger-namespace-label');
-            if (nsSelector && nsLabel) {
-                const selectedNs = nsSelector.value;
-                nsLabel.textContent = selectedNs ? selectedNs : 'All configured namespaces';
+            const isOpening = menu.classList.contains('hidden');
+
+            // Fetch cluster namespaces when opening (once)
+            if (isOpening && !clusterNamespacesLoaded) {
+                await loadClusterNamespaces();
             }
+
             menu.classList.toggle('hidden');
+        }
+
+        async function loadClusterNamespaces() {
+            const select = document.getElementById('trigger-namespace-select');
+            if (!select) return;
+
+            try {
+                const response = await fetch('/api/cluster-namespaces');
+                const data = await response.json();
+
+                if (data.namespaces && data.namespaces.length > 0) {
+                    // Clear existing options except the first one
+                    while (select.options.length > 1) {
+                        select.remove(1);
+                    }
+                    // Add cluster namespaces
+                    data.namespaces.sort().forEach(ns => {
+                        const option = document.createElement('option');
+                        option.value = ns;
+                        option.textContent = ns;
+                        select.appendChild(option);
+                    });
+                    clusterNamespacesLoaded = true;
+                }
+            } catch (err) {
+                console.error('Failed to load cluster namespaces:', err);
+            }
         }
 
         // Change namespace while preserving current run
@@ -716,8 +748,8 @@
             btn.disabled = true;
 
             try {
-                // Get currently selected namespace (if any)
-                const nsSelector = document.getElementById('namespace-filter');
+                // Get selected namespace from trigger menu dropdown
+                const nsSelector = document.getElementById('trigger-namespace-select');
                 const namespace = nsSelector ? nsSelector.value : '';
                 let url = '/api/trigger?mode=' + mode;
                 if (namespace) {
