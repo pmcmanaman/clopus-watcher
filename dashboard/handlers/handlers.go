@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kubeden/clopus-watcher/dashboard/db"
+	"github.com/kubeden/clopus-watcher/dashboard/webhooks"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1341,4 +1342,64 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// WebhookStatus returns the current webhook configuration status
+func (h *Handler) WebhookStatus(w http.ResponseWriter, r *http.Request) {
+	wm := webhooks.Get()
+	config := wm.GetConfig()
+
+	status := map[string]interface{}{
+		"enabled": wm.IsEnabled(),
+		"format":  config.Format,
+		"events":  config.Events,
+	}
+
+	if config.LastError != "" {
+		status["last_error"] = config.LastError
+	}
+	if !config.LastSuccess.IsZero() {
+		status["last_success"] = config.LastSuccess.Format(time.RFC3339)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// WebhookTest sends a test notification
+func (h *Handler) WebhookTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	wm := webhooks.Get()
+	if !wm.IsEnabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Webhooks are not enabled. Set WEBHOOK_URL environment variable.",
+		})
+		return
+	}
+
+	err := wm.SendTest()
+	if err != nil {
+		log.Printf("Webhook test failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Webhook test failed: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Webhook test sent successfully")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Test notification sent successfully",
+	})
 }

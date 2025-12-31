@@ -15,6 +15,7 @@ import (
 	"github.com/kubeden/clopus-watcher/dashboard/db"
 	"github.com/kubeden/clopus-watcher/dashboard/handlers"
 	"github.com/kubeden/clopus-watcher/dashboard/metrics"
+	"github.com/kubeden/clopus-watcher/dashboard/webhooks"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -142,6 +143,9 @@ func main() {
 
 	h := handlers.New(database, tmpl, logPath)
 
+	// Initialize webhooks
+	webhooks.Init()
+
 	// Start metrics updater goroutine
 	go updateMetrics(database)
 
@@ -186,6 +190,10 @@ func main() {
 	// Database management routes
 	mux.HandleFunc("/api/reset", h.ResetDatabase)
 	mux.HandleFunc("/api/run/delete", h.DeleteRun)
+
+	// Webhook routes
+	mux.HandleFunc("/api/webhook/status", h.WebhookStatus)
+	mux.HandleFunc("/api/webhook/test", h.WebhookTest)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

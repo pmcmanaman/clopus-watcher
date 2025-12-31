@@ -321,6 +321,34 @@
                     </svg>
                 </button>
 
+                <!-- Webhook Status -->
+                <div id="webhook-status" class="hidden">
+                    <button onclick="toggleWebhookPanel()" class="flex items-center gap-2 text-xs px-2 py-1 rounded-lg hover:bg-white/5 transition-colors" data-tooltip="Webhook notifications">
+                        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                        </svg>
+                        <span id="webhook-status-indicator" class="w-2 h-2 bg-slate-500 rounded-full"></span>
+                    </button>
+                </div>
+
+                <!-- Webhook Panel (dropdown) -->
+                <div id="webhook-panel" class="hidden absolute right-20 top-14 w-72 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-slate-200">Webhook Notifications</span>
+                            <span id="webhook-enabled-badge" class="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div id="webhook-info" class="text-xs text-slate-400">
+                            Loading status...
+                        </div>
+                        <button id="webhook-test-btn" onclick="testWebhook()" class="w-full px-3 py-2 bg-accent/10 hover:bg-accent/20 text-accent text-sm font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            Send Test Notification
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Connection Status -->
                 <div class="flex items-center gap-2 text-xs">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full status-pulse"></span>
@@ -1336,6 +1364,116 @@
                 filterRuns(currentFilter);
             }
         });
+
+        // Webhook functionality
+        let webhookEnabled = false;
+
+        async function checkWebhookStatus() {
+            try {
+                const response = await fetch('/api/webhook/status');
+                const data = await response.json();
+
+                const statusEl = document.getElementById('webhook-status');
+                const indicatorEl = document.getElementById('webhook-status-indicator');
+                const badgeEl = document.getElementById('webhook-enabled-badge');
+                const infoEl = document.getElementById('webhook-info');
+                const testBtn = document.getElementById('webhook-test-btn');
+
+                webhookEnabled = data.enabled;
+
+                if (data.enabled) {
+                    // Show the webhook status indicator
+                    statusEl.classList.remove('hidden');
+
+                    // Update indicator color based on last success/error
+                    if (data.last_error) {
+                        indicatorEl.classList.remove('bg-slate-500', 'bg-emerald-400');
+                        indicatorEl.classList.add('bg-red-400');
+                    } else if (data.last_success) {
+                        indicatorEl.classList.remove('bg-slate-500', 'bg-red-400');
+                        indicatorEl.classList.add('bg-emerald-400');
+                    }
+
+                    // Update badge
+                    badgeEl.textContent = 'Enabled';
+                    badgeEl.className = 'px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-400';
+
+                    // Update info
+                    let infoHtml = `<div class="space-y-1">`;
+                    infoHtml += `<div><span class="text-slate-500">Format:</span> ${data.format}</div>`;
+                    infoHtml += `<div><span class="text-slate-500">Events:</span> ${data.events?.join(', ') || 'all'}</div>`;
+                    if (data.last_success) {
+                        infoHtml += `<div class="text-emerald-400"><span class="text-slate-500">Last success:</span> ${new Date(data.last_success).toLocaleString()}</div>`;
+                    }
+                    if (data.last_error) {
+                        infoHtml += `<div class="text-red-400"><span class="text-slate-500">Last error:</span> ${data.last_error}</div>`;
+                    }
+                    infoHtml += `</div>`;
+                    infoEl.innerHTML = infoHtml;
+
+                    testBtn.disabled = false;
+                } else {
+                    // Still show it but indicate disabled
+                    statusEl.classList.remove('hidden');
+                    indicatorEl.classList.remove('bg-emerald-400', 'bg-red-400');
+                    indicatorEl.classList.add('bg-slate-500');
+
+                    badgeEl.textContent = 'Disabled';
+                    badgeEl.className = 'px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400';
+
+                    infoEl.innerHTML = `<div class="text-slate-500">
+                        Webhooks are not configured.<br><br>
+                        Set the <code class="bg-surface-700 px-1 rounded">WEBHOOK_URL</code> environment variable to enable notifications.
+                    </div>`;
+
+                    testBtn.disabled = true;
+                }
+            } catch (err) {
+                console.error('Failed to check webhook status:', err);
+            }
+        }
+
+        function toggleWebhookPanel() {
+            const panel = document.getElementById('webhook-panel');
+            panel.classList.toggle('hidden');
+        }
+
+        async function testWebhook() {
+            const btn = document.getElementById('webhook-test-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/webhook/test', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('Test notification sent!', 'success');
+                    // Refresh status to show updated last_success
+                    setTimeout(checkWebhookStatus, 1000);
+                } else {
+                    showToast('Failed: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = !webhookEnabled;
+            }
+        }
+
+        // Close webhook panel when clicking outside
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('webhook-panel');
+            const statusBtn = document.getElementById('webhook-status');
+            if (panel && !panel.classList.contains('hidden') && !panel.contains(e.target) && !statusBtn.contains(e.target)) {
+                panel.classList.add('hidden');
+            }
+        });
+
+        // Check webhook status on load
+        checkWebhookStatus();
     </script>
 </body>
 </html>
