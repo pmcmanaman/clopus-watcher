@@ -275,7 +275,10 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </button>
-                    <div id="trigger-menu" class="hidden absolute right-0 mt-2 w-48 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div id="trigger-menu" class="hidden absolute right-0 mt-2 w-56 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div id="trigger-namespace-hint" class="px-4 py-2 text-xs text-slate-400 border-b border-white/5 bg-white/[0.02]">
+                            Target: <span id="trigger-namespace-label" class="text-slate-300">All configured namespaces</span>
+                        </div>
                         <button onclick="triggerRun('report')" class="w-full px-4 py-3 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
                             <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -625,6 +628,13 @@
         // Trigger menu toggle
         function toggleTriggerMenu() {
             const menu = document.getElementById('trigger-menu');
+            // Update the namespace hint when opening the menu
+            const nsSelector = document.getElementById('namespace-filter');
+            const nsLabel = document.getElementById('trigger-namespace-label');
+            if (nsSelector && nsLabel) {
+                const selectedNs = nsSelector.value;
+                nsLabel.textContent = selectedNs ? selectedNs : 'All configured namespaces';
+            }
             menu.classList.toggle('hidden');
         }
 
@@ -706,13 +716,22 @@
             btn.disabled = true;
 
             try {
-                const response = await fetch('/api/trigger?mode=' + mode, {
+                // Get currently selected namespace (if any)
+                const nsSelector = document.getElementById('namespace-filter');
+                const namespace = nsSelector ? nsSelector.value : '';
+                let url = '/api/trigger?mode=' + mode;
+                if (namespace) {
+                    url += '&namespace=' + encodeURIComponent(namespace);
+                }
+
+                const response = await fetch(url, {
                     method: 'POST'
                 });
                 const data = await response.json();
 
                 if (data.success) {
-                    showToast('Run triggered: ' + data.job, 'success');
+                    const nsInfo = data.namespace ? ` (namespace: ${data.namespace})` : '';
+                    showToast('Run triggered: ' + data.job + nsInfo, 'success');
                     // Refresh the runs list after a short delay
                     setTimeout(() => {
                         window.location.reload();
