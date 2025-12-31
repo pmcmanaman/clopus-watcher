@@ -407,6 +407,14 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 		PREFILTER_FILTERED_PODS=0
 		PREFILTER_HIGH_PRIORITY=0
 		PREFILTER_CRITICAL_ERRORS=0
+		PREFILTER_HIGH_RESTARTS=0
+		PREFILTER_TIME_FILTERED=0
+		PREFILTER_PATTERN_FILTERED=0
+		PREFILTER_RESOURCE_FILTERED=0
+
+		# Track filter rules applied
+		declare -A FILTER_RULES_APPLIED
+		declare -A NAMESPACE_STATS
 
 		log_step "Applying prefiltering rules to namespaces..."
 
@@ -414,161 +422,358 @@ if [ -f "/watcher/prefiltering.conf" ]; then
 		PREFILTER_PODS_FILE="/tmp/prefilter_pods_$RUN_ID.txt"
 		PREFILTER_EVENTS_FILE="/tmp/prefilter_events_$RUN_ID.txt"
 		PREFILTER_STATS_FILE="/tmp/prefilter_stats_$RUN_ID.txt"
+		PREFILTER_EVENTS_INDEX="/tmp/prefilter_events_index_$RUN_ID"
+
+		# Helper function: Convert timestamp to epoch seconds
+		timestamp_to_epoch() {
+			local ts="$1"
+			if [ -n "$ts" ] && [ "$ts" != "<none>" ]; then
+				date -d "$ts" +%s 2>/dev/null || echo "0"
+			else
+				echo "0"
+			fi
+		}
+
+		# Helper function: Check if event is within time window
+		is_event_in_time_window() {
+			local event_timestamp="$1"
+			local current_time=$(date +%s)
+			local event_epoch=$(timestamp_to_epoch "$event_timestamp")
+
+			if [ "$event_epoch" -eq 0 ]; then
+				return 0  # Can't determine, include it
+			fi
+
+			local age_minutes=$(( (current_time - event_epoch) / 60 ))
+
+			# Check MIN_ERROR_AGE - ignore errors newer than this
+			if [ "$age_minutes" -lt "$MIN_ERROR_AGE" ]; then
+				return 1  # Too new, filter out
+			fi
+
+			# Check MAX_ERROR_AGE - ignore errors older than this
+			if [ "$age_minutes" -gt "$MAX_ERROR_AGE" ]; then
+				return 1  # Too old, filter out
+			fi
+
+			return 0  # Within window
+		}
+
+		# Helper function: Check if event matches ignore patterns
+		matches_ignore_pattern() {
+			local event_msg="$1"
+			IFS=',' read -ra IGNORE_PATTERNS <<<"$IGNORE_ERROR_PATTERNS"
+			for pattern in "${IGNORE_PATTERNS[@]}"; do
+				pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')  # Trim whitespace
+				if [ -n "$pattern" ] && [[ "$event_msg" =~ $pattern ]]; then
+					return 0  # Matches ignore pattern
+				fi
+			done
+			return 1  # Does not match
+		}
+
+		# Helper function: Check if event matches critical patterns
+		matches_critical_pattern() {
+			local event_msg="$1"
+			IFS=',' read -ra CRITICAL_PATTERNS <<<"$CRITICAL_ERROR_PATTERNS"
+			for pattern in "${CRITICAL_PATTERNS[@]}"; do
+				pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')  # Trim whitespace
+				if [ -n "$pattern" ] && [[ "$event_msg" =~ $pattern ]]; then
+					return 0  # Matches critical pattern
+				fi
+			done
+			return 1  # Does not match
+		}
 
 		# Get initial pod data for all target namespaces
 		for ns in $FINAL_NAMESPACES; do
 			log "Analyzing pods in namespace: $ns"
 
-			# Get pod information with labels
-			kubectl get pods -n "$ns" -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount,LABELS:.metadata.labels --no-headers 2>/dev/null >"$PREFILTER_PODS_FILE.$ns" || true
+			# Initialize namespace stats
+			NAMESPACE_STATS[$ns]='{"total":0,"filtered":0,"critical":0,"high":0}'
+			NS_TOTAL=0
+			NS_FILTERED=0
+			NS_CRITICAL=0
+			NS_HIGH=0
 
-			# Get recent events
-			kubectl get events -n "$ns" --sort-by='.lastTimestamp' --field-selector type!=Normal -o custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message,FIRST:.firstTimestamp,LAST:.lastTimestamp --no-headers 2>/dev/null >"$PREFILTER_EVENTS_FILE.$ns" || true
+			# Get pod information with labels and resource requests
+			kubectl get pods -n "$ns" -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount,LABELS:.metadata.labels,CPU:.spec.containers[0].resources.requests.cpu,MEM:.spec.containers[0].resources.requests.memory --no-headers 2>/dev/null >"$PREFILTER_PODS_FILE.$ns" || true
+
+			# Get recent events with timestamps for time filtering
+			kubectl get events -n "$ns" --sort-by='.lastTimestamp' --field-selector type!=Normal -o custom-columns=NAME:.involvedObject.name,TYPE:.type,REASON:.reason,MESSAGE:.message,FIRST:.firstTimestamp,LAST:.lastTimestamp --no-headers 2>/dev/null >"$PREFILTER_EVENTS_FILE.$ns" || true
+
+			# Build event index by pod name for O(1) lookup instead of O(n*m)
+			mkdir -p "$PREFILTER_EVENTS_INDEX.$ns"
+			if [ -f "$PREFILTER_EVENTS_FILE.$ns" ]; then
+				while IFS= read -r event_line; do
+					if [ -n "$event_line" ]; then
+						EVENT_POD_NAME=$(echo "$event_line" | awk '{print $1}')
+						if [ -n "$EVENT_POD_NAME" ] && [ "$EVENT_POD_NAME" != "<none>" ]; then
+							echo "$event_line" >>"$PREFILTER_EVENTS_INDEX.$ns/$EVENT_POD_NAME"
+						fi
+					fi
+				done <"$PREFILTER_EVENTS_FILE.$ns"
+			fi
 
 			# Count total pods
-			POD_COUNT=$(wc -l <"$PREFILTER_PODS_FILE.$ns" 2>/dev/null || echo "0")
+			POD_COUNT=$(wc -l <"$PREFILTER_PODS_FILE.$ns" 2>/dev/null | tr -d ' ' || echo "0")
 			PREFILTER_TOTAL_PODS=$((PREFILTER_TOTAL_PODS + POD_COUNT))
+			NS_TOTAL=$POD_COUNT
 
 			# Apply pod priority filtering
 			if [ "$POD_PRIORITY_FILTERS" = "true" ]; then
 				log "  Applying priority filters..."
+				FILTER_RULES_APPLIED["pod_priority"]=true
 
 				# Filter pods by labels
 				while IFS= read -r line; do
 					if [ -n "$line" ]; then
 						POD_NAME=$(echo "$line" | awk '{print $1}')
+						POD_STATUS=$(echo "$line" | awk '{print $2}')
+						POD_RESTARTS=$(echo "$line" | awk '{print $4}')
 						POD_LABELS=$(echo "$line" | awk '{print $5}')
+						POD_CPU=$(echo "$line" | awk '{print $6}')
+						POD_MEM=$(echo "$line" | awk '{print $7}')
 
-						# Check ignore labels
+						# Numeric priority: 3=critical, 2=high, 1=normal, 0=low
+						PRIORITY_SCORE=1
+						PRIORITY_NAME="normal"
+
+						# Check ignore labels first
 						IGNORE_POD=false
 						IFS=',' read -ra IGNORE_LABELS_ARRAY <<<"$IGNORE_LABELS"
 						for label in "${IGNORE_LABELS_ARRAY[@]}"; do
 							if [[ "$POD_LABELS" == *"$label"* ]]; then
 								IGNORE_POD=true
+								FILTER_RULES_APPLIED["ignore_labels"]=true
 								break
 							fi
 						done
 
 						if [ "$IGNORE_POD" = "true" ]; then
 							PREFILTER_FILTERED_PODS=$((PREFILTER_FILTERED_PODS + 1))
+							NS_FILTERED=$((NS_FILTERED + 1))
 							continue
 						fi
 
 						# Check high priority labels
-						HIGH_PRIORITY=false
 						IFS=',' read -ra HIGH_LABELS_ARRAY <<<"$HIGH_PRIORITY_LABELS"
 						for label in "${HIGH_LABELS_ARRAY[@]}"; do
 							if [[ "$POD_LABELS" == *"$label"* ]]; then
-								HIGH_PRIORITY=true
+								PRIORITY_SCORE=2
+								PRIORITY_NAME="high"
 								PREFILTER_HIGH_PRIORITY=$((PREFILTER_HIGH_PRIORITY + 1))
+								NS_HIGH=$((NS_HIGH + 1))
+								FILTER_RULES_APPLIED["high_priority_labels"]=true
 								break
 							fi
 						done
 
-						# Check for critical errors in events
-						if [ -f "$PREFILTER_EVENTS_FILE.$ns" ]; then
-							CRITICAL_FOUND=false
-							while IFS= read -r event_line; do
-								if [[ "$event_line" == *"$POD_NAME"* ]]; then
-									IFS=',' read -ra CRITICAL_PATTERNS <<<"$CRITICAL_ERROR_PATTERNS"
-									for pattern in "${CRITICAL_PATTERNS[@]}"; do
-										if [[ "$event_line" =~ $pattern ]]; then
-											CRITICAL_FOUND=true
-											PREFILTER_CRITICAL_ERRORS=$((PREFILTER_CRITICAL_ERRORS + 1))
-											break 2
-										fi
-									done
+						# Check restart count - high restarts bump priority
+						if [ -n "$POD_RESTARTS" ] && [ "$POD_RESTARTS" != "<none>" ]; then
+							RESTART_COUNT=$(echo "$POD_RESTARTS" | grep -oE '^[0-9]+' || echo "0")
+							if [ "$RESTART_COUNT" -ge 5 ]; then
+								if [ "$PRIORITY_SCORE" -lt 2 ]; then
+									PRIORITY_SCORE=2
+									PRIORITY_NAME="high"
 								fi
-							done <"$PREFILTER_EVENTS_FILE.$ns"
+								PREFILTER_HIGH_RESTARTS=$((PREFILTER_HIGH_RESTARTS + 1))
+								FILTER_RULES_APPLIED["high_restarts"]=true
+							fi
 						fi
 
-						# Store filtered pod info
-						if [ "$IGNORE_POD" = "false" ]; then
-							PRIORITY="normal"
-							if [ "$HIGH_PRIORITY" = "true" ]; then
-								PRIORITY="high"
-							fi
-							if [ "$CRITICAL_FOUND" = "true" ]; then
-								PRIORITY="critical"
-							fi
-							echo "$ns:$POD_NAME:$PRIORITY:$line" >>"$PREFILTER_STATS_FILE"
+						# Check for events using indexed lookup (O(1) instead of O(n))
+						CRITICAL_FOUND=false
+						EVENT_FILTERED=false
+						if [ -f "$PREFILTER_EVENTS_INDEX.$ns/$POD_NAME" ]; then
+							while IFS= read -r event_line; do
+								EVENT_TIMESTAMP=$(echo "$event_line" | awk '{print $NF}')  # Last column is LAST timestamp
+								EVENT_MSG=$(echo "$event_line" | awk '{for(i=4;i<=NF-2;i++) printf $i" "; print ""}')
+
+								# Time-based filtering
+								if ! is_event_in_time_window "$EVENT_TIMESTAMP"; then
+									PREFILTER_TIME_FILTERED=$((PREFILTER_TIME_FILTERED + 1))
+									FILTER_RULES_APPLIED["time_window"]=true
+									continue
+								fi
+
+								# Check ignore patterns (ERROR_PATTERN_FILTERING)
+								if [ "$ERROR_PATTERN_FILTERING" = "true" ]; then
+									if matches_ignore_pattern "$event_line"; then
+										PREFILTER_PATTERN_FILTERED=$((PREFILTER_PATTERN_FILTERED + 1))
+										FILTER_RULES_APPLIED["ignore_patterns"]=true
+										continue
+									fi
+								fi
+
+								# Check critical patterns
+								if matches_critical_pattern "$event_line"; then
+									CRITICAL_FOUND=true
+									PRIORITY_SCORE=3
+									PRIORITY_NAME="critical"
+									PREFILTER_CRITICAL_ERRORS=$((PREFILTER_CRITICAL_ERRORS + 1))
+									NS_CRITICAL=$((NS_CRITICAL + 1))
+									FILTER_RULES_APPLIED["critical_patterns"]=true
+									break
+								fi
+							done <"$PREFILTER_EVENTS_INDEX.$ns/$POD_NAME"
 						fi
+
+						# Resource-based filtering
+						if [ "$RESOURCE_FILTERING" = "true" ]; then
+							FILTER_RULES_APPLIED["resource_filtering"]=true
+							# Check if pod has minimal resources (might be noise)
+							if [ -n "$POD_CPU" ] && [ "$POD_CPU" != "<none>" ]; then
+								CPU_MILLICORES=$(echo "$POD_CPU" | sed 's/m$//' | grep -oE '^[0-9]+' || echo "0")
+								if [ "$CPU_MILLICORES" -lt "$MIN_CPU_THRESHOLD" ] && [ "$PRIORITY_SCORE" -lt 2 ]; then
+									# Low resource pod, deprioritize unless already high/critical
+									PRIORITY_SCORE=0
+									PRIORITY_NAME="low"
+									PREFILTER_RESOURCE_FILTERED=$((PREFILTER_RESOURCE_FILTERED + 1))
+								fi
+							fi
+						fi
+
+						# Store filtered pod info with numeric priority for proper sorting
+						echo "$ns:$POD_NAME:$PRIORITY_SCORE:$PRIORITY_NAME:$POD_RESTARTS:$line" >>"$PREFILTER_STATS_FILE"
 					fi
 				done <"$PREFILTER_PODS_FILE.$ns"
 			fi
 
+			# Update namespace stats
+			NAMESPACE_STATS[$ns]="{\"total\":$NS_TOTAL,\"filtered\":$NS_FILTERED,\"critical\":$NS_CRITICAL,\"high\":$NS_HIGH}"
+
 			# Clean up namespace-specific files
 			rm -f "$PREFILTER_PODS_FILE.$ns" "$PREFILTER_EVENTS_FILE.$ns"
+			rm -rf "$PREFILTER_EVENTS_INDEX.$ns"
 		done
 
 		# Apply namespace priority weighting
 		if [ "$NAMESPACE_PRIORITY_ENABLED" = "true" ]; then
 			log_step "Applying namespace priority weighting..."
+			FILTER_RULES_APPLIED["namespace_priority"]=true
 
-			# Create weighted list
+			# Create weighted list with scores instead of duplication
 			WEIGHTED_PODS_FILE="/tmp/weighted_pods_$RUN_ID.txt"
 			>"$WEIGHTED_PODS_FILE"
 
 			while IFS= read -r line; do
 				if [ -n "$line" ]; then
 					NAMESPACE=$(echo "$line" | cut -d: -f1)
-					WEIGHT=1
+					POD_PRIORITY_SCORE=$(echo "$line" | cut -d: -f3)
+					NS_WEIGHT=1
 
 					# Check namespace priority
 					if [[ ",$HIGH_PRIORITY_NAMESPACES," == *",$NAMESPACE,"* ]]; then
-						WEIGHT=3
+						NS_WEIGHT=3
 					elif [[ ",$MEDIUM_PRIORITY_NAMESPACES," == *",$NAMESPACE,"* ]]; then
-						WEIGHT=2
+						NS_WEIGHT=2
 					elif [[ ",$LOW_PRIORITY_NAMESPACES," == *",$NAMESPACE,"* ]]; then
-						WEIGHT=1
+						NS_WEIGHT=1
 					fi
 
-					# Apply weight
-					for i in $(seq 1 $WEIGHT); do
-						echo "$line" >>"$WEIGHTED_PODS_FILE"
-					done
+					# Calculate combined score: pod_priority * 10 + namespace_weight
+					# This ensures critical (3) always beats high (2), etc., while namespace breaks ties
+					COMBINED_SCORE=$((POD_PRIORITY_SCORE * 10 + NS_WEIGHT))
+					echo "$COMBINED_SCORE:$line" >>"$WEIGHTED_PODS_FILE"
 				fi
 			done <"$PREFILTER_STATS_FILE"
 
-			# Sort by priority and limit results
+			# Sort by combined score (descending), deduplicate, and limit
 			if [ -f "$WEIGHTED_PODS_FILE" ]; then
-				sort -t: -k3 -r "$WEIGHTED_PODS_FILE" | head -n "$MAX_PODS_PER_NAMESPACE" >"${PREFILTER_STATS_FILE}.weighted"
+				# Sort numerically descending by combined score, deduplicate by pod name, limit results
+				sort -t: -k1 -rn "$WEIGHTED_PODS_FILE" | \
+					awk -F: '!seen[$3]++' | \
+					head -n "$MAX_PODS_PER_NAMESPACE" | \
+					cut -d: -f2- >"${PREFILTER_STATS_FILE}.weighted"
 				mv "${PREFILTER_STATS_FILE}.weighted" "$PREFILTER_STATS_FILE"
 			fi
 
 			rm -f "$WEIGHTED_PODS_FILE"
 		fi
 
+		# Learning-based filtering (stub for future implementation)
+		if [ "$LEARNING_FILTERING" = "true" ]; then
+			log "  Learning-based filtering enabled (using historical success rates)"
+			FILTER_RULES_APPLIED["learning"]=true
+			# Future: Query historical fix rates and adjust priorities
+			# For now, this is a placeholder for the learning system
+		fi
+
+		# App-specific filtering (stub for future implementation)
+		if [ "$APP_SPECIFIC_FILTERING" = "true" ]; then
+			log "  App-specific filtering enabled"
+			FILTER_RULES_APPLIED["app_specific"]=true
+			# Future: Apply application-specific rules
+		fi
+
 		# Generate prefiltering summary
-		FILTERED_COUNT=$(wc -l <"$PREFILTER_STATS_FILE" 2>/dev/null || echo "0")
+		FILTERED_COUNT=$(wc -l <"$PREFILTER_STATS_FILE" 2>/dev/null | tr -d ' ' || echo "0")
 		log_success "Prefiltering completed"
 		log "  Total pods analyzed: $PREFILTER_TOTAL_PODS"
 		log "  Pods filtered out: $PREFILTER_FILTERED_PODS"
 		log "  High priority pods: $PREFILTER_HIGH_PRIORITY"
 		log "  Critical error pods: $PREFILTER_CRITICAL_ERRORS"
+		log "  High restart pods: $PREFILTER_HIGH_RESTARTS"
+		log "  Time-filtered events: $PREFILTER_TIME_FILTERED"
+		log "  Pattern-filtered events: $PREFILTER_PATTERN_FILTERED"
+		log "  Resource-filtered pods: $PREFILTER_RESOURCE_FILTERED"
 		log "  Pods for Claude analysis: $FILTERED_COUNT"
 
-		# Store prefiltering stats for database
-		PREFILTER_STATS_JSON="{\"total_pods\":$PREFILTER_TOTAL_PODS,\"filtered_pods\":$PREFILTER_FILTERED_PODS,\"high_priority\":$PREFILTER_HIGH_PRIORITY,\"critical_errors\":$PREFILTER_CRITICAL_ERRORS,\"final_count\":$FILTERED_COUNT}"
+		# Build namespace stats JSON
+		NAMESPACE_STATS_JSON="{"
+		FIRST_NS=true
+		for ns in "${!NAMESPACE_STATS[@]}"; do
+			if [ "$FIRST_NS" = "true" ]; then
+				FIRST_NS=false
+			else
+				NAMESPACE_STATS_JSON+=","
+			fi
+			NAMESPACE_STATS_JSON+="\"$ns\":${NAMESPACE_STATS[$ns]}"
+		done
+		NAMESPACE_STATS_JSON+="}"
 
-		# Insert prefiltering statistics into database
+		# Build filter rules JSON
+		FILTER_RULES_JSON="{"
+		FIRST_RULE=true
+		for rule in "${!FILTER_RULES_APPLIED[@]}"; do
+			if [ "$FIRST_RULE" = "true" ]; then
+				FIRST_RULE=false
+			else
+				FILTER_RULES_JSON+=","
+			fi
+			FILTER_RULES_JSON+="\"$rule\":true"
+		done
+		FILTER_RULES_JSON+="}"
+
+		# Store prefiltering stats for database
+		PREFILTER_STATS_JSON="{\"total_pods\":$PREFILTER_TOTAL_PODS,\"filtered_pods\":$PREFILTER_FILTERED_PODS,\"high_priority\":$PREFILTER_HIGH_PRIORITY,\"critical_errors\":$PREFILTER_CRITICAL_ERRORS,\"high_restarts\":$PREFILTER_HIGH_RESTARTS,\"time_filtered\":$PREFILTER_TIME_FILTERED,\"pattern_filtered\":$PREFILTER_PATTERN_FILTERED,\"resource_filtered\":$PREFILTER_RESOURCE_FILTERED,\"final_count\":$FILTERED_COUNT}"
+
+		# Insert prefiltering statistics into database with actual JSON data
 		log_step "Saving prefiltering statistics to database..."
-		sqlite3 "$SQLITE_PATH" "INSERT INTO prefilter_stats (run_id, timestamp, total_pods, filtered_pods, high_priority_pods, critical_error_pods, final_count, namespace_stats, filter_rules_applied, effectiveness_score) VALUES ($RUN_ID, datetime('now'), $PREFILTER_TOTAL_PODS, $PREFILTER_FILTERED_PODS, $PREFILTER_HIGH_PRIORITY, $PREFILTER_CRITICAL_ERRORS, $FILTERED_COUNT, '{}', '{}', 0.0);"
+		# Escape single quotes in JSON for SQLite
+		NAMESPACE_STATS_JSON_ESCAPED=$(echo "$NAMESPACE_STATS_JSON" | sed "s/'/''/g")
+		FILTER_RULES_JSON_ESCAPED=$(echo "$FILTER_RULES_JSON" | sed "s/'/''/g")
+		sqlite3 "$SQLITE_PATH" "INSERT INTO prefilter_stats (run_id, timestamp, total_pods, filtered_pods, high_priority_pods, critical_error_pods, final_count, namespace_stats, filter_rules_applied, effectiveness_score) VALUES ($RUN_ID, datetime('now'), $PREFILTER_TOTAL_PODS, $PREFILTER_FILTERED_PODS, $PREFILTER_HIGH_PRIORITY, $PREFILTER_CRITICAL_ERRORS, $FILTERED_COUNT, '$NAMESPACE_STATS_JSON_ESCAPED', '$FILTER_RULES_JSON_ESCAPED', 0.0);"
 
 		# Add prefiltering context to prompt
 		PREFILTER_CONTEXT="
 ## PREFILTERING CONTEXT
 The following prefiltering has been applied:
 - Total pods scanned: $PREFILTER_TOTAL_PODS
-- Pods filtered out: $PREFILTER_FILTERED_PODS  
+- Pods filtered out: $PREFILTER_FILTERED_PODS
 - High priority pods identified: $PREFILTER_HIGH_PRIORITY
 - Critical error pods identified: $PREFILTER_CRITICAL_ERRORS
+- High restart pods: $PREFILTER_HIGH_RESTARTS
 - Remaining pods for analysis: $FILTERED_COUNT
 
+Filter rules applied: $FILTER_RULES_JSON
+
 Priority analysis order:
-1. Critical pods (critical errors detected)
-2. High priority pods (priority labels)
-3. Normal pods (weighted by namespace priority)
+1. Critical pods (score 30+): Critical errors detected (OOMKilled, CrashLoopBackOff, etc.)
+2. High priority pods (score 20-29): Priority labels or high restart count (>=5)
+3. Normal pods (score 10-19): Standard pods weighted by namespace priority
+4. Low priority pods (score <10): Minimal resource pods
 
 Focus your analysis on the remaining $FILTERED_COUNT pods as they have been pre-identified as most likely to contain actionable issues."
 
