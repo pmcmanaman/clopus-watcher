@@ -410,7 +410,10 @@ export NODE_NO_WARNINGS=1
 # Use stream-json format to see tool calls in real-time
 # Parse the JSON stream and display human-readable output with timestamps
 STREAM_FILE="/tmp/claude_stream_$RUN_ID.jsonl"
-ACCUMULATED_TEXT=""
+TEXT_FILE="/tmp/claude_text_$RUN_ID.txt"
+
+# Initialize text file for capturing all text output (for report parsing)
+> "$TEXT_FILE"
 
 claude --dangerously-skip-permissions --output-format stream-json --verbose -p "$PROMPT" 2>&1 | while IFS= read -r line; do
     # Save raw stream for debugging
@@ -467,6 +470,9 @@ claude --dangerously-skip-permissions --output-format stream-json --verbose -p "
                             ;;
                     esac
                 done
+                # Also capture any text content from assistant messages
+                TEXT=$(echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null)
+                [ -n "$TEXT" ] && echo "$TEXT" >> "$TEXT_FILE"
                 ;;
 
             "user")
@@ -481,7 +487,7 @@ claude --dangerously-skip-permissions --output-format stream-json --verbose -p "
                     TOOL_NAME=$(echo "$line" | jq -r '.content_block.name // empty' 2>/dev/null)
                     [ -n "$TOOL_NAME" ] && log_step "▶ Calling: $TOOL_NAME"
                 elif [ "$BLOCK_TYPE" = "text" ]; then
-                    log "  Claude is thinking..."
+                    log "  Claude is responding..."
                 fi
                 ;;
 
@@ -489,23 +495,28 @@ claude --dangerously-skip-permissions --output-format stream-json --verbose -p "
                 DELTA_TYPE=$(echo "$line" | jq -r '.delta.type // empty' 2>/dev/null)
                 if [ "$DELTA_TYPE" = "text_delta" ]; then
                     TEXT=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
-                    # Stream text output (Claude's response)
-                    [ -n "$TEXT" ] && printf "%s" "$TEXT"
+                    # Stream text output (Claude's response) and save for report parsing
+                    if [ -n "$TEXT" ]; then
+                        printf "%s" "$TEXT"
+                        printf "%s" "$TEXT" >> "$TEXT_FILE"
+                    fi
                 fi
                 ;;
 
             "content_block_stop")
                 # End of a content block - add newline if we were streaming text
                 echo ""
+                echo "" >> "$TEXT_FILE"
                 ;;
 
             "result")
                 # Final result
                 log_success "Claude finished processing"
                 RESULT=$(echo "$line" | jq -r '.result // empty' 2>/dev/null)
-                [ -n "$RESULT" ] && [ "$RESULT" != "null" ] && echo "$RESULT"
-                # Save result for report parsing
-                echo "$RESULT" >> "$OUTPUT_FILE"
+                if [ -n "$RESULT" ] && [ "$RESULT" != "null" ]; then
+                    echo "$RESULT"
+                    echo "$RESULT" >> "$TEXT_FILE"
+                fi
                 ;;
 
             "error")
@@ -519,11 +530,8 @@ claude --dangerously-skip-permissions --output-format stream-json --verbose -p "
     fi
 done 2>&1 | tee -a "$LOG_FILE"
 
-# If stream file exists, also check for report markers in the result
-if [ -f "$STREAM_FILE" ]; then
-    # Extract final result text for report parsing
-    jq -r 'select(.type == "result") | .result // empty' "$STREAM_FILE" >> "$OUTPUT_FILE" 2>/dev/null || true
-fi
+# Copy accumulated text to output file for report parsing
+[ -f "$TEXT_FILE" ] && cp "$TEXT_FILE" "$OUTPUT_FILE"
 
 log "─────────────────────────────────────────────────────────────"
 
@@ -538,8 +546,15 @@ REPORT=""
 if grep -q "===REPORT_START===" "$OUTPUT_FILE" 2>/dev/null; then
     REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/p' "$OUTPUT_FILE" | grep -v "===REPORT" | tr -d '\n' | tr -s ' ')
     log_success "Found structured report"
+    # Debug: show what we extracted
+    log "  Raw report content: $(echo "$REPORT" | head -c 500)"
 else
     log_warn "No structured report markers found in output"
+    # Debug: show last 50 lines of output file to help diagnose
+    log "  Output file tail:"
+    tail -20 "$OUTPUT_FILE" 2>/dev/null | while read -r line; do
+        log "    $line"
+    done
 fi
 
 # Extract values from report with defaults
@@ -634,7 +649,7 @@ WHERE id = $(validate_numeric $RUN_ID);"
 log_success "Run record updated"
 
 # Cleanup
-rm -f "$OUTPUT_FILE" "$STREAM_FILE"
+rm -f "$OUTPUT_FILE" "$STREAM_FILE" "$TEXT_FILE"
 
 # === FINAL SUMMARY ===
 log_section "Run #$RUN_ID Complete"
