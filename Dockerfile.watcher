@@ -37,9 +37,12 @@ COPY watcher/master-prompt-report.md /app/master-prompt-report.md
 COPY watcher/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Copy prefiltering configuration
+COPY watcher/prefiltering.conf /watcher/prefiltering.conf
+
 # Create directories and set permissions
-RUN mkdir -p /data /home/claude/.claude \
-    && chown -R claude:claude /app /data /home/claude
+RUN mkdir -p /data /home/claude/.claude /watcher \
+    && chown -R claude:claude /app /data /home/claude /watcher
 
 # Set environment defaults
 ENV TARGET_NAMESPACE=default
