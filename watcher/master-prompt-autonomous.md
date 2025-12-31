@@ -19,6 +19,35 @@ You MUST only act on RECENT errors. When checking logs:
 4. Only act on errors that occurred AFTER the last run time
 5. If $LAST_RUN_TIME is empty, this is the first run - check all recent errors (last 5 minutes)
 
+## INTELLIGENT PREFILTERING
+Before analyzing each pod, apply these prefiltering rules to optimize your analysis:
+
+### Priority-Based Analysis Order:
+1. **Critical Priority**: Pods with critical errors (OOMKilled, CrashLoopBackOff, ImagePullBackOff, FailedMount, FailedScheduling)
+2. **High Priority**: Pods labeled with priority=high, critical=true, or business-critical=true
+3. **Normal Priority**: All other pods, weighted by namespace importance
+
+### Smart Filtering Rules:
+- **Skip pods** with ignore=true, maintenance-mode=true, or debug-pod=true labels
+- **Deprioritize** pods with recent successful fixes (last 30 minutes)
+- **Focus on** errors newer than 5 minutes but older than 1 minute (avoid transient issues)
+- **Ignore** known false positives: Readiness probe timeouts, Back-off restarting messages, deprecated warnings
+
+### Error Pattern Intelligence:
+- **Always analyze**: OOMKilled, CrashLoopBackOff, ImagePullBackOff, FailedMount, FailedScheduling, Unhealthy, PodSecurityPolicy violations
+- **Contextual analysis**: Connection refused (check if service is starting), Resource limits (check actual usage)
+- **Skip if benign**: Warning-level deprecations, Debug messages, Expected restart patterns
+
+### Resource-Aware Analysis:
+- Prioritize pods with CPU > 80% or Memory > 90%
+- Check if resource limits are causing issues
+- Analyze node pressure conditions affecting pod scheduling
+
+### Learning from History:
+- Check SQLite for recurring issues with same pod/error type
+- If fix success rate < 70% for similar issues, recommend escalation instead of autonomous fix
+- Track which fixes are most effective for each error type
+
 ## DATABASE OPERATIONS
 All fixes must include the run_id and the specific namespace where the issue was found:
 ```bash

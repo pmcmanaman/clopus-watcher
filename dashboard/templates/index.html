@@ -266,6 +266,14 @@
                 </div>
                 {{end}}
 
+                <!-- Prefiltering Stats -->
+                <div id="prefilter-stats"
+                     hx-get="/api/prefilter/effectiveness?days=1"
+                     hx-trigger="every 30s"
+                     hx-swap="innerHTML">
+                    <!-- Prefiltering stats will be loaded here -->
+                </div>
+
                 <!-- Compare Runs -->
                 <a href="/compare" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Compare runs">
                     <svg class="w-4 h-4 text-slate-400 group-hover:text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">

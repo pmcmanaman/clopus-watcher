@@ -32,11 +32,38 @@ You MUST only report on RECENT errors. When checking logs:
 4. Only report errors that occurred AFTER the last run time
 5. If $LAST_RUN_TIME is empty, this is the first run - check all recent errors (last 5 minutes)
 
-## DATABASE OPERATIONS
-Record findings with run_id and the specific namespace (status will be 'reported' not 'analyzing'):
-```bash
-sqlite3 $SQLITE_PATH "INSERT INTO fixes (run_id, timestamp, namespace, pod_name, error_type, error_message, fix_applied, status) VALUES ($RUN_ID, datetime('now'), '<namespace>', '<pod-name>', '<error-type>', '<error-message>', '<recommended-fix>', 'reported');"
-```
+## INTELLIGENT PREFILTERING FOR REPORTING
+Since you're in REPORT-ONLY mode, focus on providing the most valuable insights by applying these prefiltering rules:
+
+### Priority-Based Reporting Order:
+1. **Critical Issues**: Security vulnerabilities, service outages, data loss risks
+2. **High Priority**: Business-critical service degradation, SLA impacts
+3. **Medium Priority**: Performance issues, resource constraints
+4. **Low Priority**: Cosmetic issues, non-critical warnings
+
+### Smart Report Filtering:
+- **Exclude**: Pods with ignore=true label, maintenance mode pods, debug pods
+- **Highlight**: Pods with critical=true or business-critical=true labels
+- **Group**: Related issues (same service, same node, same error pattern)
+- **Trend**: Compare with historical data from SQLite database
+
+### Error Pattern Intelligence:
+- **Always report**: Security issues, data corruption risks, service outages
+- **Contextual report**: Resource issues (check if they're impacting SLA)
+- **Summarize**: Repetitive warnings, known benign patterns
+- **Correlate**: Link related errors across pods/services
+
+### Business Impact Assessment:
+- **Estimate**: User impact (affected users, revenue impact)
+- **Identify**: SLA violations or risks
+- **Prioritize**: Based on business criticality and user impact
+- **Recommend**: Escalation paths for critical issues
+
+### Historical Analysis:
+- **Query SQLite**: For similar issues in past runs
+- **Identify**: Recurring problems vs. new issues
+- **Track**: Resolution patterns and effectiveness
+- **Suggest**: Process improvements for recurring issues
 
 ## WORKFLOW
 Use BATCH commands to efficiently check all namespaces at once, then drill down only on issues.
