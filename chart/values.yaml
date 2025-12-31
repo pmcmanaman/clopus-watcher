@@ -116,7 +116,7 @@ dashboard:
 
 # Authentication configuration
 auth:
-  # Mode: "api-key", "oauth-token", or "credentials"
+  # Mode: "api-key" or "credentials"
   mode: "api-key"
 
   # API key authentication (when mode is "api-key")
@@ -129,18 +129,9 @@ auth:
     # WARNING: For production, use existingSecret or external secrets management
     value: ""
 
-  # OAuth token authentication (when mode is "oauth-token")
-  # Generate token with: claude /login then copy the token
-  oauthToken:
-    # Use existing secret instead of creating one
-    existingSecret: ""
-    # Secret key name
-    secretKey: "oauth-token"
-    # OAuth token value (only used if existingSecret is empty)
-    # WARNING: For production, use existingSecret or external secrets management
-    value: ""
-
   # Credentials authentication (when mode is "credentials")
+  # Use this for Claude Pro/subscription OAuth credentials
+  # Extract from keychain: security find-generic-password -s "Claude Code-credentials" -a "YOUR_USERNAME" -w
   credentials:
     # Existing secret containing credentials.json
     existingSecret: ""

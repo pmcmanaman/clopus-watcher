@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     jq \
     ca-certificates \
     gnupg \
+    coreutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (required for Claude Code)
