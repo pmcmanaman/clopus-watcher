@@ -116,7 +116,7 @@ dashboard:
 
 # Authentication configuration
 auth:
-  # Mode: "api-key" or "credentials"
+  # Mode: "api-key", "oauth-token", or "credentials"
   mode: "api-key"
 
   # API key authentication (when mode is "api-key")
@@ -126,6 +126,17 @@ auth:
     # Secret key name
     secretKey: "api-key"
     # API key value (only used if existingSecret is empty)
+    # WARNING: For production, use existingSecret or external secrets management
+    value: ""
+
+  # OAuth token authentication (when mode is "oauth-token")
+  # Generate token with: claude /login then copy the token
+  oauthToken:
+    # Use existing secret instead of creating one
+    existingSecret: ""
+    # Secret key name
+    secretKey: "oauth-token"
+    # OAuth token value (only used if existingSecret is empty)
     # WARNING: For production, use existingSecret or external secrets management
     value: ""
 
