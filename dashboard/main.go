@@ -82,6 +82,11 @@ func main() {
 	}
 	defer database.Close()
 
+	// Initialize intelligence tables for ML features
+	if err := database.InitIntelligenceTables(); err != nil {
+		log.Printf("Warning: Failed to initialize intelligence tables: %v", err)
+	}
+
 	// Template functions
 	funcMap := template.FuncMap{
 		"dict": func(values ...interface{}) map[string]interface{} {
@@ -220,6 +225,25 @@ func main() {
 	// Webhook routes
 	mux.HandleFunc("/api/webhook/status", h.WebhookStatus)
 	mux.HandleFunc("/api/webhook/test", h.WebhookTest)
+
+	// Intelligence API routes
+	mux.HandleFunc("/api/intelligence/recurring-issues", h.APIRecurringIssues)
+	mux.HandleFunc("/api/intelligence/similar-issues", h.APISimilarIssues)
+	mux.HandleFunc("/api/intelligence/fix-success-rates", h.APIFixSuccessRates)
+	mux.HandleFunc("/api/intelligence/anomalies", h.APIAnomalies)
+	mux.HandleFunc("/api/intelligence/correlations", h.APICorrelatedIssues)
+	mux.HandleFunc("/api/intelligence/runbook", h.APIRunbook)
+
+	// Node health routes
+	mux.HandleFunc("/api/nodes/health", h.APINodeHealth)
+	mux.HandleFunc("/api/nodes/unhealthy", h.APIUnhealthyNodes)
+	mux.HandleFunc("/api/nodes/live", h.APILiveNodeHealth)
+
+	// Live pod logs routes
+	mux.HandleFunc("/api/pods", h.APIListPods)
+	mux.HandleFunc("/api/pods/containers", h.APIPodContainers)
+	mux.HandleFunc("/api/pods/logs", h.APIPodLogs)
+	mux.HandleFunc("/api/pods/logs/stream", h.APIPodLogsStream)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

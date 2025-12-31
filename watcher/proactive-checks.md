@@ -86,6 +86,43 @@ kubectl get resourcequota -n $TARGET_NAMESPACE 2>/dev/null || echo "No quotas"
 | ResourceQuota >80% used | Warning | Deployment failures soon |
 | ResourceQuota >95% used | Critical | Cannot deploy new pods |
 
+### Node Health Checks
+**IMPORTANT:** Check node health as part of every run. Record issues to the database.
+
+```bash
+# Get all nodes and their status
+kubectl get nodes -o wide
+
+# Get detailed node conditions
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[*]}{.type}={.status}{" "}{end}{"\n"}{end}'
+
+# Check for node pressures
+kubectl describe nodes | grep -E "(Name:|Conditions:|MemoryPressure|DiskPressure|PIDPressure|Ready)"
+
+# Get node resource usage (if metrics-server installed)
+kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+
+# Get node allocatable vs capacity
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}CPU:{.status.allocatable.cpu}{"\t"}Memory:{.status.allocatable.memory}{"\n"}{end}'
+```
+
+| Check | Severity | Description | Action |
+|-------|----------|-------------|--------|
+| Node NotReady | Critical | Node is not accepting pods | Investigate node, check kubelet |
+| MemoryPressure=True | Warning | Node low on memory | Evict low-priority pods, add capacity |
+| DiskPressure=True | Warning | Node low on disk | Clean up images, expand disk |
+| PIDPressure=True | Warning | Node running out of PIDs | Check for process leaks |
+| NetworkUnavailable=True | Critical | Node network issues | Check CNI, node networking |
+| Node Unschedulable | Info | Node cordoned | Planned maintenance or issue |
+| High CPU usage (>90%) | Warning | Node CPU saturated | Rebalance pods or add nodes |
+| High Memory usage (>90%) | Warning | Node memory saturated | Rebalance pods or add nodes |
+
+**Node Health Database Recording:**
+For each node with issues, record to the database:
+```bash
+sqlite3 $SQLITE_PATH "INSERT INTO node_health (run_id, node_name, status, memory_pressure, disk_pressure, pid_pressure, network_unavailable, allocatable_cpu, allocatable_memory, pod_count, timestamp) VALUES ($RUN_ID, '<node-name>', '<Ready|NotReady>', <0|1>, <0|1>, <0|1>, <0|1>, '<cpu>', '<memory>', <pod-count>, datetime('now'));"
+```
+
 ### Proactive Issue Recommendations
 | Risk | Recommendation |
 |------|----------------|
@@ -112,6 +149,7 @@ When proactive checks are enabled, use this extended report format:
 ===REPORT_START===
 {
   "pod_count": <number of pods checked>,
+  "node_count": <number of nodes checked>,
   "error_count": <number of current errors>,
   "warning_count": <number of proactive warnings>,
   "fix_count": <number of fixes applied>,
@@ -119,12 +157,24 @@ When proactive checks are enabled, use this extended report format:
   "summary": "<one sentence summary>",
   "details": [
     {
-      "pod": "<name or 'cluster' for cluster-wide>",
+      "pod": "<name or 'cluster' for cluster-wide or node name for node issues>",
+      "namespace": "<namespace or empty for cluster-wide>",
       "issue": "<description>",
-      "type": "<current|proactive>",
+      "type": "<current|proactive|node>",
       "severity": "<critical|warning|info>",
-      "category": "<application|config|resources|networking|scheduling|security|storage|availability|capacity>",
-      "recommendation": "<specific fix>"
+      "category": "<application|config|resources|networking|scheduling|security|storage|availability|capacity|node>",
+      "recommendation": "<specific fix>",
+      "action": "<kubectl command to fix or 'manual intervention required'>"
+    }
+  ],
+  "node_health": [
+    {
+      "name": "<node-name>",
+      "status": "<Ready|NotReady|Unknown>",
+      "memory_pressure": <true|false>,
+      "disk_pressure": <true|false>,
+      "pid_pressure": <true|false>,
+      "issues": ["<issue1>", "<issue2>"]
     }
   ]
 }
@@ -137,3 +187,4 @@ Additional status:
 Additional categories:
 - "availability": Replicas, PDB, HPA, single points of failure
 - "capacity": Node resources, quotas, cluster limits
+- "node": Node-level health issues

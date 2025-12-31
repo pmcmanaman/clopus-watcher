@@ -69,4 +69,49 @@ var (
 		},
 		[]string{"namespace"},
 	)
+
+	// RecurringIssues tracks issues that have occurred multiple times
+	RecurringIssues = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "clopus_recurring_issues",
+			Help: "Number of recurring issues by type",
+		},
+		[]string{"error_type", "category"},
+	)
+
+	// AnomaliesDetected counts anomalies detected
+	AnomaliesDetected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "clopus_anomalies_total",
+			Help: "Total number of anomalies detected",
+		},
+		[]string{"namespace", "anomaly_type", "severity"},
+	)
+
+	// FixSuccessRate tracks fix success rate
+	FixSuccessRateGauge = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "clopus_fix_success_rate",
+			Help: "Fix success rate by fix type (0-1)",
+		},
+		[]string{"fix_type"},
+	)
+
+	// NodeHealth tracks node health status
+	NodeHealthStatus = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "clopus_node_health",
+			Help: "Node health status (1=healthy, 0=unhealthy)",
+		},
+		[]string{"node"},
+	)
+
+	// NodePressure tracks node pressure conditions
+	NodePressure = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "clopus_node_pressure",
+			Help: "Node pressure conditions (1=pressure, 0=ok)",
+		},
+		[]string{"node", "pressure_type"},
+	)
 )
