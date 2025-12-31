@@ -227,13 +227,13 @@ type PageData struct {
 	ReportSummary     string
 	ReportDetails     []ReportDetailWithCommands
 	// Pagination
-	CurrentPage       int
-	TotalPages        int
-	TotalRuns         int
-	PageSize          int
+	CurrentPage int
+	TotalPages  int
+	TotalRuns   int
+	PageSize    int
 	// Filters
-	StatusFilter      string
-	SearchQuery       string
+	StatusFilter string
+	SearchQuery  string
 }
 
 func (h *Handler) readLog() string {
@@ -1401,5 +1401,706 @@ func (h *Handler) WebhookTest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Test notification sent successfully",
+	})
+}
+
+// === Intelligence Feature Handlers ===
+
+// APIRecurringIssues returns issues that have occurred multiple times
+func (h *Handler) APIRecurringIssues(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+	minOccStr := r.URL.Query().Get("min")
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	minOccurrences := 2
+	if minOccStr != "" {
+		if m, err := strconv.Atoi(minOccStr); err == nil && m > 0 && m <= 100 {
+			minOccurrences = m
+		}
+	}
+
+	issues, err := h.db.GetRecurringIssues(minOccurrences, days)
+	if err != nil {
+		log.Printf("Error getting recurring issues: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"issues":          issues,
+		"days":            days,
+		"min_occurrences": minOccurrences,
+	})
+}
+
+// APISimilarIssues finds similar historical issues for a given error
+func (h *Handler) APISimilarIssues(w http.ResponseWriter, r *http.Request) {
+	errorType := r.URL.Query().Get("error_type")
+	errorMessage := r.URL.Query().Get("error_message")
+	category := r.URL.Query().Get("category")
+
+	if errorType == "" {
+		http.Error(w, "error_type parameter required", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := h.db.GetSimilarIssues(errorType, errorMessage, category, 10)
+	if err != nil {
+		log.Printf("Error getting similar issues: %v", err)
+		// Return empty array instead of error
+		issues = []db.IssueFingerprint{}
+	}
+
+	// Get recommended fix if available
+	recommendedFix, successRate, _ := h.db.GetRecommendedFix(errorType, category)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"similar_issues":   issues,
+		"recommended_fix":  recommendedFix,
+		"fix_success_rate": successRate,
+	})
+}
+
+// APIFixSuccessRates returns fix success rates by type
+func (h *Handler) APIFixSuccessRates(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	rates, err := h.db.GetFixSuccessRateByType(days)
+	if err != nil {
+		log.Printf("Error getting fix success rates: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rates": rates,
+		"days":  days,
+	})
+}
+
+// APIAnomalies returns detected anomalies
+func (h *Handler) APIAnomalies(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("ns")
+	daysStr := r.URL.Query().Get("days")
+	limitStr := r.URL.Query().Get("limit")
+
+	if !validateNamespace(namespace) {
+		http.Error(w, "Invalid namespace parameter", http.StatusBadRequest)
+		return
+	}
+
+	days := 7
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+
+	limit := 50
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 200 {
+			limit = l
+		}
+	}
+
+	anomalies, err := h.db.GetRecentAnomalies(namespace, days, limit)
+	if err != nil {
+		log.Printf("Error getting anomalies: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"anomalies": anomalies,
+		"days":      days,
+		"namespace": namespace,
+	})
+}
+
+// APICorrelatedIssues returns correlated issues for a fix
+func (h *Handler) APICorrelatedIssues(w http.ResponseWriter, r *http.Request) {
+	fixIDStr := r.URL.Query().Get("fix_id")
+
+	fixID, err := strconv.Atoi(fixIDStr)
+	if err != nil || fixID <= 0 {
+		http.Error(w, "Invalid fix_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	correlations, err := h.db.GetCorrelatedIssuesForFix(fixID)
+	if err != nil {
+		log.Printf("Error getting correlations: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"correlations": correlations,
+		"fix_id":       fixID,
+	})
+}
+
+// APIRunbook returns the runbook for an issue type
+func (h *Handler) APIRunbook(w http.ResponseWriter, r *http.Request) {
+	errorType := r.URL.Query().Get("error_type")
+	category := r.URL.Query().Get("category")
+	fingerprintIDStr := r.URL.Query().Get("fingerprint_id")
+
+	var runbook *db.Runbook
+	var err error
+
+	if fingerprintIDStr != "" {
+		fingerprintID, _ := strconv.Atoi(fingerprintIDStr)
+		if fingerprintID > 0 {
+			runbook, err = h.db.GetRunbook(fingerprintID)
+		}
+	} else if errorType != "" {
+		runbook, err = h.db.GetRunbookForIssue(errorType, category)
+	} else {
+		http.Error(w, "error_type or fingerprint_id required", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"runbook": nil,
+			"message": "No runbook found for this issue type",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runbook": runbook,
+	})
+}
+
+// === Node Health Handlers ===
+
+// APINodeHealth returns node health data
+func (h *Handler) APINodeHealth(w http.ResponseWriter, r *http.Request) {
+	runIDStr := r.URL.Query().Get("run_id")
+
+	if runIDStr != "" {
+		runID, err := strconv.Atoi(runIDStr)
+		if err != nil || runID <= 0 {
+			http.Error(w, "Invalid run_id parameter", http.StatusBadRequest)
+			return
+		}
+
+		nodes, err := h.db.GetNodeHealthByRun(runID)
+		if err != nil {
+			log.Printf("Error getting node health for run %d: %v", runID, err)
+			http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"nodes":  nodes,
+			"run_id": runID,
+		})
+		return
+	}
+
+	// Return latest health for all nodes
+	nodes, err := h.db.GetLatestNodeHealth()
+	if err != nil {
+		log.Printf("Error getting latest node health: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"nodes": nodes,
+	})
+}
+
+// APIUnhealthyNodes returns nodes with issues
+func (h *Handler) APIUnhealthyNodes(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+
+	days := 7
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+
+	nodes, err := h.db.GetUnhealthyNodes(days)
+	if err != nil {
+		log.Printf("Error getting unhealthy nodes: %v", err)
+		http.Error(w, "Error retrieving data", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"nodes": nodes,
+		"days":  days,
+	})
+}
+
+// APILiveNodeHealth fetches current node health from the cluster
+func (h *Handler) APILiveNodeHealth(w http.ResponseWriter, r *http.Request) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Not running in cluster",
+			"nodes": []interface{}{},
+		})
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to create k8s client: %v", err),
+			"nodes": []interface{}{},
+		})
+		return
+	}
+
+	ctx := context.Background()
+	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to list nodes: %v", err),
+			"nodes": []interface{}{},
+		})
+		return
+	}
+
+	var nodes []map[string]interface{}
+	for _, node := range nodeList.Items {
+		nodeInfo := map[string]interface{}{
+			"name":   node.Name,
+			"status": "Unknown",
+		}
+
+		// Get status from conditions
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == corev1.NodeReady {
+				if condition.Status == corev1.ConditionTrue {
+					nodeInfo["status"] = "Ready"
+				} else {
+					nodeInfo["status"] = "NotReady"
+				}
+			}
+			if condition.Type == corev1.NodeMemoryPressure && condition.Status == corev1.ConditionTrue {
+				nodeInfo["memory_pressure"] = true
+			}
+			if condition.Type == corev1.NodeDiskPressure && condition.Status == corev1.ConditionTrue {
+				nodeInfo["disk_pressure"] = true
+			}
+			if condition.Type == corev1.NodePIDPressure && condition.Status == corev1.ConditionTrue {
+				nodeInfo["pid_pressure"] = true
+			}
+			if condition.Type == corev1.NodeNetworkUnavailable && condition.Status == corev1.ConditionTrue {
+				nodeInfo["network_unavailable"] = true
+			}
+		}
+
+		// Get allocatable resources
+		if cpu := node.Status.Allocatable.Cpu(); cpu != nil {
+			nodeInfo["allocatable_cpu"] = cpu.String()
+		}
+		if mem := node.Status.Allocatable.Memory(); mem != nil {
+			nodeInfo["allocatable_memory"] = mem.String()
+		}
+
+		// Get node info
+		nodeInfo["os"] = node.Status.NodeInfo.OSImage
+		nodeInfo["kernel"] = node.Status.NodeInfo.KernelVersion
+		nodeInfo["container_runtime"] = node.Status.NodeInfo.ContainerRuntimeVersion
+		nodeInfo["kubelet_version"] = node.Status.NodeInfo.KubeletVersion
+
+		nodes = append(nodes, nodeInfo)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"nodes":     nodes,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// === Live Pod Logs Handler ===
+
+// APIPodLogs streams pod logs
+func (h *Handler) APIPodLogs(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("namespace")
+	podName := r.URL.Query().Get("pod")
+	container := r.URL.Query().Get("container")
+	tailStr := r.URL.Query().Get("tail")
+	previous := r.URL.Query().Get("previous") == "true"
+
+	if namespace == "" || podName == "" {
+		http.Error(w, "namespace and pod parameters required", http.StatusBadRequest)
+		return
+	}
+
+	tail := int64(100)
+	if tailStr != "" {
+		if t, err := strconv.ParseInt(tailStr, 10, 64); err == nil && t > 0 && t <= 5000 {
+			tail = t
+		}
+	}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Not running in cluster",
+			"logs":  "",
+		})
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to create k8s client: %v", err),
+			"logs":  "",
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	podLogOpts := &corev1.PodLogOptions{
+		TailLines:  &tail,
+		Timestamps: true,
+		Previous:   previous,
+	}
+
+	if container != "" {
+		podLogOpts.Container = container
+	}
+
+	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, podLogOpts)
+	podLogs, err := req.Stream(ctx)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to get logs: %v", err),
+			"logs":  "",
+		})
+		return
+	}
+	defer podLogs.Close()
+
+	// Read logs into buffer
+	buf := new(strings.Builder)
+	readBuf := make([]byte, 4096)
+	for {
+		n, readErr := podLogs.Read(readBuf)
+		if n > 0 {
+			buf.Write(readBuf[:n])
+		}
+		if readErr != nil {
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"logs":      buf.String(),
+		"namespace": namespace,
+		"pod":       podName,
+		"container": container,
+		"tail":      tail,
+		"previous":  previous,
+	})
+}
+
+// APIPodLogsStream provides SSE streaming of pod logs
+func (h *Handler) APIPodLogsStream(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("namespace")
+	podName := r.URL.Query().Get("pod")
+	container := r.URL.Query().Get("container")
+
+	if namespace == "" || podName == "" {
+		http.Error(w, "namespace and pod parameters required", http.StatusBadRequest)
+		return
+	}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		http.Error(w, "Not running in cluster", http.StatusServiceUnavailable)
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create k8s client: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+
+	sinceSeconds := int64(1) // Start from 1 second ago
+	podLogOpts := &corev1.PodLogOptions{
+		Follow:       true,
+		Timestamps:   true,
+		SinceSeconds: &sinceSeconds,
+	}
+
+	if container != "" {
+		podLogOpts.Container = container
+	}
+
+	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, podLogOpts)
+	podLogs, err := req.Stream(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to stream logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer podLogs.Close()
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Read and stream logs line by line
+	buf := make([]byte, 4096)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			n, err := podLogs.Read(buf)
+			if err != nil {
+				// Send error event and close
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+				flusher.Flush()
+				return
+			}
+			if n > 0 {
+				// Send log data as SSE event
+				lines := strings.Split(string(buf[:n]), "\n")
+				for _, line := range lines {
+					if line != "" {
+						fmt.Fprintf(w, "data: %s\n\n", line)
+					}
+				}
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// APIPodContainers returns containers for a pod
+func (h *Handler) APIPodContainers(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("namespace")
+	podName := r.URL.Query().Get("pod")
+
+	if namespace == "" || podName == "" {
+		http.Error(w, "namespace and pod parameters required", http.StatusBadRequest)
+		return
+	}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      "Not running in cluster",
+			"containers": []interface{}{},
+		})
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      fmt.Sprintf("Failed to create k8s client: %v", err),
+			"containers": []interface{}{},
+		})
+		return
+	}
+
+	ctx := context.Background()
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      fmt.Sprintf("Pod not found: %v", err),
+			"containers": []interface{}{},
+		})
+		return
+	}
+
+	var containers []map[string]interface{}
+
+	// Init containers
+	for _, c := range pod.Spec.InitContainers {
+		containerInfo := map[string]interface{}{
+			"name":  c.Name,
+			"type":  "init",
+			"image": c.Image,
+		}
+		containers = append(containers, containerInfo)
+	}
+
+	// Regular containers
+	for _, c := range pod.Spec.Containers {
+		containerInfo := map[string]interface{}{
+			"name":  c.Name,
+			"type":  "container",
+			"image": c.Image,
+		}
+
+		// Find status
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Name == c.Name {
+				containerInfo["ready"] = cs.Ready
+				containerInfo["restart_count"] = cs.RestartCount
+				if cs.State.Running != nil {
+					containerInfo["state"] = "running"
+				} else if cs.State.Waiting != nil {
+					containerInfo["state"] = "waiting"
+					containerInfo["reason"] = cs.State.Waiting.Reason
+				} else if cs.State.Terminated != nil {
+					containerInfo["state"] = "terminated"
+					containerInfo["reason"] = cs.State.Terminated.Reason
+				}
+				break
+			}
+		}
+
+		containers = append(containers, containerInfo)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"containers": containers,
+		"namespace":  namespace,
+		"pod":        podName,
+	})
+}
+
+// APIListPods returns pods in a namespace
+func (h *Handler) APIListPods(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("namespace")
+
+	if namespace == "" {
+		http.Error(w, "namespace parameter required", http.StatusBadRequest)
+		return
+	}
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Not running in cluster",
+			"pods":  []interface{}{},
+		})
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to create k8s client: %v", err),
+			"pods":  []interface{}{},
+		})
+		return
+	}
+
+	ctx := context.Background()
+	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Failed to list pods: %v", err),
+			"pods":  []interface{}{},
+		})
+		return
+	}
+
+	var pods []map[string]interface{}
+	for _, pod := range podList.Items {
+		podInfo := map[string]interface{}{
+			"name":      pod.Name,
+			"namespace": pod.Namespace,
+			"status":    string(pod.Status.Phase),
+			"node":      pod.Spec.NodeName,
+		}
+
+		// Get container count and ready count
+		totalContainers := len(pod.Spec.Containers)
+		readyContainers := 0
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Ready {
+				readyContainers++
+			}
+		}
+		podInfo["containers"] = fmt.Sprintf("%d/%d", readyContainers, totalContainers)
+
+		// Get restarts
+		restarts := 0
+		for _, cs := range pod.Status.ContainerStatuses {
+			restarts += int(cs.RestartCount)
+		}
+		podInfo["restarts"] = restarts
+
+		// Get age
+		if !pod.CreationTimestamp.IsZero() {
+			podInfo["age"] = time.Since(pod.CreationTimestamp.Time).Round(time.Second).String()
+		}
+
+		pods = append(pods, podInfo)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"pods":      pods,
+		"namespace": namespace,
 	})
 }
