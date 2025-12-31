@@ -47,6 +47,7 @@ To manually trigger the watcher:
 To view watcher job logs:
   kubectl logs -l app.kubernetes.io/component=watcher -n {{ include "clopus-watcher.namespace" . }} --tail=100
 
+{{- if eq .Values.auth.mode "api-key" }}
 {{- if not .Values.auth.apiKey.value }}
 {{- if not .Values.auth.apiKey.existingSecret }}
 
@@ -63,6 +64,28 @@ You need to set your Anthropic API key. Either:
 
 3. Use an existing secret:
    helm upgrade {{ .Release.Name }} ./chart --set auth.apiKey.existingSecret=your-secret-name
+{{- end }}
+{{- end }}
+{{- else if eq .Values.auth.mode "oauth-token" }}
+{{- if not .Values.auth.oauthToken.value }}
+{{- if not .Values.auth.oauthToken.existingSecret }}
+
+=== ACTION REQUIRED ===
+You need to set your Claude OAuth token. Generate one with: claude /login
+
+Then either:
+
+1. Upgrade with the OAuth token:
+   helm upgrade {{ .Release.Name }} ./chart --set auth.mode=oauth-token --set auth.oauthToken.value=YOUR_TOKEN
+
+2. Create a secret manually:
+   kubectl create secret generic {{ include "clopus-watcher.authSecretName" . }} \
+     --from-literal={{ .Values.auth.oauthToken.secretKey }}=YOUR_TOKEN \
+     -n {{ include "clopus-watcher.namespace" . }}
+
+3. Use an existing secret:
+   helm upgrade {{ .Release.Name }} ./chart --set auth.mode=oauth-token --set auth.oauthToken.existingSecret=your-secret-name
+{{- end }}
 {{- end }}
 {{- end }}
 

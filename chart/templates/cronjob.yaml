@@ -71,6 +71,12 @@ spec:
                     secretKeyRef:
                       name: {{ include "clopus-watcher.authSecretName" . }}
                       key: {{ .Values.auth.apiKey.secretKey }}
+                {{- else if eq .Values.auth.mode "oauth-token" }}
+                - name: CLAUDE_CODE_OAUTH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "clopus-watcher.authSecretName" . }}
+                      key: {{ .Values.auth.oauthToken.secretKey }}
                 {{- end }}
               volumeMounts:
                 - name: data
