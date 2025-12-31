@@ -41,7 +41,7 @@ spec:
                   value: "/data/watcher.db"
                 - name: HOME
                   value: "/home/claude"
-                # AUTH_MODE: "api-key" (default) or "credentials"
+                # AUTH_MODE: "api-key" (default), "oauth-token", or "credentials"
                 - name: AUTH_MODE
                   value: "api-key"
                 # Option 1: API Key auth (AUTH_MODE=api-key)
@@ -51,7 +51,13 @@ spec:
                       name: claude-auth
                       key: api-key
                       optional: true
-                # Option 2: Credentials auth (AUTH_MODE=credentials)
+                # Option 2: OAuth Token auth (AUTH_MODE=oauth-token)
+                # - name: CLAUDE_CODE_OAUTH_TOKEN
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: claude-auth
+                #       key: oauth-token
+                # Option 3: Credentials auth (AUTH_MODE=credentials)
                 # Mount credentials.json via volumeMounts below
               volumeMounts:
                 - name: data
