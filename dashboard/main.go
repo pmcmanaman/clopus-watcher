@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -127,6 +128,31 @@ func main() {
 				}
 			}
 			return names
+		},
+		// duration calculates the duration between two timestamps
+		"duration": func(startedAt, endedAt string) string {
+			if startedAt == "" || endedAt == "" {
+				return ""
+			}
+			start, err := time.Parse("2006-01-02 15:04:05", startedAt)
+			if err != nil {
+				return ""
+			}
+			end, err := time.Parse("2006-01-02 15:04:05", endedAt)
+			if err != nil {
+				return ""
+			}
+			d := end.Sub(start)
+			if d < 0 {
+				return ""
+			}
+			if d < time.Minute {
+				return fmt.Sprintf("%ds", int(d.Seconds()))
+			}
+			if d < time.Hour {
+				return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+			}
+			return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
 		},
 	}
 
