@@ -232,13 +232,13 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
                 <!-- Namespace Selector -->
                 <div class="flex items-center gap-2">
-                    <span class="text-xs text-slate-500 uppercase tracking-wider">Namespace</span>
+                    <span class="text-xs text-slate-500 uppercase tracking-wider hidden sm:inline">Namespace</span>
                     <div class="relative">
                         <select id="ns-select"
-                                class="appearance-none bg-surface-800/80 border border-white/10 rounded-lg px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all cursor-pointer"
+                                class="appearance-none bg-surface-800/80 border border-white/10 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all cursor-pointer"
                                 onchange="changeNamespace(this.value)">
                             {{if not .Namespaces}}
                             <option value="">No namespaces</option>
@@ -249,16 +249,19 @@
                             {{end}}
                             {{end}}
                         </select>
-                        <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </div>
                 </div>
 
-                <!-- Stats Pills -->
+                <!-- Divider -->
+                <div class="h-6 w-px bg-white/10 hidden lg:block"></div>
+
+                <!-- Quick Stats (compact) -->
                 {{if .Stats}}
                 <div id="header-stats"
-                     class="hidden lg:flex items-center gap-2"
+                     class="hidden xl:flex items-center gap-2"
                      hx-get="/partials/stats?ns={{.CurrentNS}}"
                      hx-trigger="every 10s"
                      hx-swap="innerHTML">
@@ -266,27 +269,49 @@
                 </div>
                 {{end}}
 
-                <!-- Prefiltering Stats -->
-                <div id="prefilter-stats"
-                     hx-get="/api/prefilter/effectiveness?days=1"
-                     hx-trigger="every 30s"
-                     hx-swap="innerHTML">
-                    <!-- Prefiltering stats will be loaded here -->
+                <!-- Tools Dropdown -->
+                <div class="relative">
+                    <button id="tools-btn" onclick="toggleToolsMenu()" class="flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors text-sm">
+                        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                        <span class="text-slate-300 hidden sm:inline">Views</span>
+                        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <div id="tools-menu" class="hidden absolute right-0 mt-2 w-56 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div class="py-1">
+                            <button onclick="toggleAnalytics(); closeToolsMenu();" class="w-full px-4 py-2.5 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
+                                <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                                </svg>
+                                <span class="text-slate-200">Analytics</span>
+                            </button>
+                            <button onclick="toggleNodeHealth(); closeToolsMenu();" class="w-full px-4 py-2.5 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
+                                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                                </svg>
+                                <span class="text-slate-200">Node Health</span>
+                                <span id="node-health-badge" class="ml-auto px-1.5 py-0.5 text-xs rounded bg-emerald-500/20 text-emerald-400 hidden">0</span>
+                            </button>
+                            <a href="/compare" class="w-full px-4 py-2.5 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
+                                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+                                </svg>
+                                <span class="text-slate-200">Compare Runs</span>
+                            </a>
+                            <div class="border-t border-white/5 my-1"></div>
+                            <button onclick="toggleWebhookPanel(); closeToolsMenu();" class="w-full px-4 py-2.5 text-left text-sm hover:bg-white/5 transition-colors flex items-center gap-3">
+                                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                                </svg>
+                                <span class="text-slate-200">Webhooks</span>
+                                <span id="webhook-menu-indicator" class="ml-auto w-2 h-2 bg-slate-500 rounded-full"></span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-
-                <!-- Compare Runs -->
-                <a href="/compare" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Compare runs">
-                    <svg class="w-4 h-4 text-slate-400 group-hover:text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
-                    </svg>
-                </a>
-
-                <!-- Analytics Toggle -->
-                <button onclick="toggleAnalytics()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Analytics">
-                    <svg class="w-4 h-4 text-slate-400 group-hover:text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                    </svg>
-                </button>
 
                 <!-- Trigger Run Button -->
                 <div class="relative">
@@ -295,10 +320,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <span>Run Now</span>
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                        </svg>
+                        <span class="hidden sm:inline">Run</span>
                     </button>
                     <div id="trigger-menu" class="hidden absolute right-0 mt-2 w-64 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
                         <div class="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
@@ -328,6 +350,9 @@
                     </div>
                 </div>
 
+                <!-- Divider -->
+                <div class="h-6 w-px bg-white/10"></div>
+
                 <!-- Theme Toggle -->
                 <button onclick="toggleTheme()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Toggle theme">
                     <svg id="theme-icon-dark" class="w-4 h-4 text-slate-400 group-hover:text-accent hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -339,24 +364,21 @@
                 </button>
 
                 <!-- Browser Notifications Toggle -->
-                <button id="notification-toggle" onclick="requestNotificationPermission()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Enable notifications">
+                <button id="notification-toggle" onclick="requestNotificationPermission()" class="p-2 hover:bg-white/5 rounded-lg transition-colors group" data-tooltip="Notifications">
                     <svg id="notification-icon" class="w-4 h-4 text-slate-400 group-hover:text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
                     </svg>
                 </button>
 
-                <!-- Webhook Status -->
-                <div id="webhook-status" class="hidden">
-                    <button onclick="toggleWebhookPanel()" class="flex items-center gap-2 text-xs px-2 py-1 rounded-lg hover:bg-white/5 transition-colors" data-tooltip="Webhook notifications">
-                        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-                        </svg>
-                        <span id="webhook-status-indicator" class="w-2 h-2 bg-slate-500 rounded-full"></span>
-                    </button>
+                <!-- Connection Status -->
+                <div class="flex items-center gap-2 text-xs">
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full status-pulse"></span>
+                    <span class="text-slate-400 hidden sm:inline">Live</span>
                 </div>
 
-                <!-- Webhook Panel (dropdown) -->
-                <div id="webhook-panel" class="hidden absolute right-20 top-14 w-72 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                <!-- Hidden elements for dropdowns -->
+                <div id="webhook-status" class="hidden"></div>
+                <div id="webhook-panel" class="hidden fixed right-4 top-16 w-72 bg-surface-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
                     <div class="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
                         <div class="flex items-center justify-between">
                             <span class="text-sm font-medium text-slate-200">Webhook Notifications</span>
@@ -371,12 +393,6 @@
                             Send Test Notification
                         </button>
                     </div>
-                </div>
-
-                <!-- Connection Status -->
-                <div class="flex items-center gap-2 text-xs">
-                    <span class="w-2 h-2 bg-emerald-400 rounded-full status-pulse"></span>
-                    <span class="text-slate-400">Live</span>
                 </div>
             </div>
         </div>
@@ -614,6 +630,84 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Node Health Panel (hidden by default) -->
+            <div id="node-health-panel" class="hidden border-b border-white/5 bg-surface-900/30">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                            </svg>
+                            Node Health
+                        </h2>
+                        <div class="flex items-center gap-3">
+                            <button onclick="refreshNodeHealth()" class="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-slate-300 transition-colors">
+                                <svg id="node-refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                </svg>
+                                Refresh
+                            </button>
+                            <button onclick="toggleNodeHealth()" class="p-1.5 hover:bg-white/5 rounded-lg transition-colors">
+                                <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Node Health Summary -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-surface-800/50 rounded-xl p-4 border border-white/5">
+                            <div class="text-2xl font-bold text-emerald-400" id="nodes-healthy-count">-</div>
+                            <div class="text-xs text-slate-500 mt-1">Healthy Nodes</div>
+                        </div>
+                        <div class="bg-surface-800/50 rounded-xl p-4 border border-white/5">
+                            <div class="text-2xl font-bold text-red-400" id="nodes-unhealthy-count">-</div>
+                            <div class="text-xs text-slate-500 mt-1">Unhealthy Nodes</div>
+                        </div>
+                        <div class="bg-surface-800/50 rounded-xl p-4 border border-white/5">
+                            <div class="text-2xl font-bold text-amber-400" id="nodes-memory-pressure">-</div>
+                            <div class="text-xs text-slate-500 mt-1">Memory Pressure</div>
+                        </div>
+                        <div class="bg-surface-800/50 rounded-xl p-4 border border-white/5">
+                            <div class="text-2xl font-bold text-amber-400" id="nodes-disk-pressure">-</div>
+                            <div class="text-xs text-slate-500 mt-1">Disk Pressure</div>
+                        </div>
+                    </div>
+
+                    <!-- Node List -->
+                    <div class="bg-surface-800/50 rounded-xl border border-white/5 overflow-hidden">
+                        <div class="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                            <h3 class="text-sm font-medium text-slate-300">All Nodes</h3>
+                        </div>
+                        <div class="max-h-64 overflow-y-auto scrollbar-thin">
+                            <table class="w-full text-sm">
+                                <thead class="text-xs text-slate-500 uppercase bg-surface-800/30 sticky top-0">
+                                    <tr>
+                                        <th class="text-left px-4 py-2">Node</th>
+                                        <th class="text-center px-4 py-2">Status</th>
+                                        <th class="text-center px-4 py-2">Memory</th>
+                                        <th class="text-center px-4 py-2">Disk</th>
+                                        <th class="text-center px-4 py-2">PID</th>
+                                        <th class="text-right px-4 py-2">Last Check</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="node-health-body" class="text-slate-300 divide-y divide-white/5">
+                                    <tr>
+                                        <td colspan="6" class="text-center py-8 text-slate-500">
+                                            <svg class="w-8 h-8 mx-auto mb-2 text-slate-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                            </svg>
+                                            Loading node health data...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -975,11 +1069,173 @@
             menu.classList.toggle('hidden');
         }
 
+        // Tools menu toggle
+        function toggleToolsMenu() {
+            const menu = document.getElementById('tools-menu');
+            menu.classList.toggle('hidden');
+        }
+
+        function closeToolsMenu() {
+            const menu = document.getElementById('tools-menu');
+            menu.classList.add('hidden');
+        }
+
+        // Node Health panel
+        let nodeHealthLoaded = false;
+
+        function toggleNodeHealth() {
+            const panel = document.getElementById('node-health-panel');
+            const isHidden = panel.classList.contains('hidden');
+
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                if (!nodeHealthLoaded) {
+                    refreshNodeHealth();
+                    nodeHealthLoaded = true;
+                }
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        async function refreshNodeHealth() {
+            const icon = document.getElementById('node-refresh-icon');
+            if (icon) icon.classList.add('animate-spin');
+
+            try {
+                const response = await fetch('/api/nodes/live');
+                const data = await response.json();
+
+                if (data.error) {
+                    renderNodeHealthError(data.error);
+                    return;
+                }
+
+                renderNodeHealth(data.nodes || []);
+            } catch (err) {
+                console.error('Error fetching node health:', err);
+                renderNodeHealthError(err.message);
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+            }
+        }
+
+        function renderNodeHealth(nodes) {
+            let healthy = 0, unhealthy = 0, memPressure = 0, diskPressure = 0;
+
+            nodes.forEach(node => {
+                if (node.status === 'Ready' || node.status === 'True') {
+                    healthy++;
+                } else {
+                    unhealthy++;
+                }
+                if (node.memory_pressure === 'True' || node.memory_pressure === true) memPressure++;
+                if (node.disk_pressure === 'True' || node.disk_pressure === true) diskPressure++;
+            });
+
+            // Update summary cards
+            document.getElementById('nodes-healthy-count').textContent = healthy;
+            document.getElementById('nodes-unhealthy-count').textContent = unhealthy;
+            document.getElementById('nodes-memory-pressure').textContent = memPressure;
+            document.getElementById('nodes-disk-pressure').textContent = diskPressure;
+
+            // Update badge in menu
+            const badge = document.getElementById('node-health-badge');
+            if (badge) {
+                if (unhealthy > 0 || memPressure > 0 || diskPressure > 0) {
+                    badge.classList.remove('hidden', 'bg-emerald-500/20', 'text-emerald-400');
+                    badge.classList.add('bg-red-500/20', 'text-red-400');
+                    badge.textContent = unhealthy + memPressure + diskPressure;
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+
+            // Render node table
+            const tbody = document.getElementById('node-health-body');
+            if (!tbody) return;
+
+            if (nodes.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center py-8 text-slate-500">
+                            No nodes found. Make sure the dashboard has access to the cluster.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = nodes.map(node => {
+                const statusClass = (node.status === 'Ready' || node.status === 'True')
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-red-500/20 text-red-400';
+                const statusText = (node.status === 'Ready' || node.status === 'True') ? 'Ready' : node.status || 'Unknown';
+
+                const memClass = (node.memory_pressure === 'True' || node.memory_pressure === true)
+                    ? 'text-amber-400' : 'text-emerald-400';
+                const diskClass = (node.disk_pressure === 'True' || node.disk_pressure === true)
+                    ? 'text-amber-400' : 'text-emerald-400';
+                const pidClass = (node.pid_pressure === 'True' || node.pid_pressure === true)
+                    ? 'text-amber-400' : 'text-emerald-400';
+
+                const memText = (node.memory_pressure === 'True' || node.memory_pressure === true) ? 'Pressure' : 'OK';
+                const diskText = (node.disk_pressure === 'True' || node.disk_pressure === true) ? 'Pressure' : 'OK';
+                const pidText = (node.pid_pressure === 'True' || node.pid_pressure === true) ? 'Pressure' : 'OK';
+
+                const lastCheck = node.last_check ? new Date(node.last_check).toLocaleTimeString() : 'Now';
+
+                return `
+                    <tr class="hover:bg-white/[0.02]">
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-slate-200">${node.node_name || node.name}</div>
+                            ${node.roles ? `<div class="text-xs text-slate-500">${node.roles}</div>` : ''}
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
+                        </td>
+                        <td class="px-4 py-3 text-center ${memClass}">${memText}</td>
+                        <td class="px-4 py-3 text-center ${diskClass}">${diskText}</td>
+                        <td class="px-4 py-3 text-center ${pidClass}">${pidText}</td>
+                        <td class="px-4 py-3 text-right text-slate-500 text-xs">${lastCheck}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderNodeHealthError(error) {
+            const tbody = document.getElementById('node-health-body');
+            if (!tbody) return;
+
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-8">
+                        <svg class="w-8 h-8 mx-auto mb-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <div class="text-red-400 font-medium">Failed to load node health</div>
+                        <div class="text-slate-500 text-sm mt-1">${error}</div>
+                    </td>
+                </tr>
+            `;
+
+            // Reset summary
+            document.getElementById('nodes-healthy-count').textContent = '-';
+            document.getElementById('nodes-unhealthy-count').textContent = '-';
+            document.getElementById('nodes-memory-pressure').textContent = '-';
+            document.getElementById('nodes-disk-pressure').textContent = '-';
+        }
+
         // Close export menu when clicking outside
         document.addEventListener('click', (e) => {
             const menu = document.getElementById('export-menu');
             if (!e.target.closest('#export-menu') && !e.target.closest('[onclick="toggleExportMenu()"]')) {
                 menu.classList.add('hidden');
+            }
+            // Close tools menu
+            const toolsMenu = document.getElementById('tools-menu');
+            if (toolsMenu && !e.target.closest('#tools-menu') && !e.target.closest('#tools-btn')) {
+                toolsMenu.classList.add('hidden');
             }
             // Also close trigger menu
             const triggerMenu = document.getElementById('trigger-menu');
