@@ -221,10 +221,19 @@ elif [ "$AUTH_MODE" = "api-key" ]; then
         exit 1
     fi
     echo "Using API key authentication"
+elif [ "$AUTH_MODE" = "oauth-token" ]; then
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        echo "ERROR: AUTH_MODE=oauth-token but CLAUDE_CODE_OAUTH_TOKEN not set"
+        echo "  Tip: Generate a token with 'claude /login' and set CLAUDE_CODE_OAUTH_TOKEN"
+        echo "  Example: kubectl create secret generic claude-oauth --from-literal=oauth-token=YOUR_TOKEN"
+        exit 1
+    fi
+    echo "Using OAuth token authentication"
 else
-    echo "ERROR: Invalid AUTH_MODE: $AUTH_MODE (use 'api-key' or 'credentials')"
+    echo "ERROR: Invalid AUTH_MODE: $AUTH_MODE (use 'api-key', 'oauth-token', or 'credentials')"
     echo "  Valid options:"
     echo "    - api-key: Use ANTHROPIC_API_KEY environment variable"
+    echo "    - oauth-token: Use CLAUDE_CODE_OAUTH_TOKEN environment variable"
     echo "    - credentials: Use mounted credentials.json file"
     exit 1
 fi

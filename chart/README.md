@@ -63,9 +63,11 @@ helm install clopus-watcher ./chart \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `auth.mode` | Auth mode: `api-key` or `credentials` | `api-key` |
+| `auth.mode` | Auth mode: `api-key`, `oauth-token`, or `credentials` | `api-key` |
 | `auth.apiKey.existingSecret` | Existing secret with API key | `""` |
 | `auth.apiKey.secretKey` | Key in secret | `api-key` |
+| `auth.oauthToken.existingSecret` | Existing secret with OAuth token | `""` |
+| `auth.oauthToken.secretKey` | Key in secret | `oauth-token` |
 
 ### Persistence
 

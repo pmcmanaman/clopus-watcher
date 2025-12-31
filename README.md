@@ -69,7 +69,7 @@ See [examples/argocd-application.yaml](examples/argocd-application.yaml) for ful
 | `watcher.proactiveChecks` | Enable proactive issue detection | `false` |
 | `dashboard.enabled` | Enable web dashboard | `true` |
 | `dashboard.ingress.enabled` | Enable ingress | `false` |
-| `auth.mode` | Auth mode: `api-key` or `credentials` | `api-key` |
+| `auth.mode` | Auth mode: `api-key`, `oauth-token`, or `credentials` | `api-key` |
 | `persistence.enabled` | Enable persistent storage | `true` |
 | `metrics.enabled` | Enable Prometheus metrics | `true` |
 
