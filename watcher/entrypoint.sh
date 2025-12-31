@@ -544,16 +544,29 @@ log_step "Extracting report data from output..."
 
 REPORT=""
 if grep -q "===REPORT_START===" "$OUTPUT_FILE" 2>/dev/null; then
-    REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/p' "$OUTPUT_FILE" | grep -v "===REPORT" | tr -d '\n' | tr -s ' ')
+    # Extract report - first get raw content between markers
+    RAW_REPORT=$(sed -n '/===REPORT_START===/,/===REPORT_END===/p' "$OUTPUT_FILE" | grep -v "===REPORT")
+
+    # Debug: save raw extracted content
+    echo "$RAW_REPORT" > /tmp/debug_raw_report_$RUN_ID.txt
+    log "  Raw lines extracted: $(echo "$RAW_REPORT" | wc -l)"
+
+    # Clean up the JSON - remove newlines and extra spaces
+    REPORT=$(echo "$RAW_REPORT" | tr -d '\n' | tr -s ' ' | sed 's/^ *//' | sed 's/ *$//')
+
+    # Debug: save cleaned report
+    echo "$REPORT" > /tmp/debug_clean_report_$RUN_ID.txt
     log_success "Found structured report"
-    # Debug: show what we extracted
-    log "  Raw report content: $(echo "$REPORT" | head -c 500)"
+    log "  Report length: ${#REPORT} chars"
+    log "  First 300 chars: $(echo "$REPORT" | head -c 300)"
 else
     log_warn "No structured report markers found in output"
-    # Debug: show last 50 lines of output file to help diagnose
-    log "  Output file tail:"
-    tail -20 "$OUTPUT_FILE" 2>/dev/null | while read -r line; do
-        log "    $line"
+    log "  Output file size: $(wc -c < "$OUTPUT_FILE" 2>/dev/null || echo 0) bytes"
+    log "  Output file lines: $(wc -l < "$OUTPUT_FILE" 2>/dev/null || echo 0)"
+    # Debug: show last lines of output file
+    log "  Last 10 lines:"
+    tail -10 "$OUTPUT_FILE" 2>/dev/null | while read -r line; do
+        log "    $(echo "$line" | head -c 100)"
     done
 fi
 
@@ -566,23 +579,40 @@ STATUS="ok"
 if [ -n "$REPORT" ]; then
     # Validate JSON structure first
     if command -v jq >/dev/null 2>&1; then
-        # Use jq for robust JSON parsing
-        if echo "$REPORT" | jq empty 2>/dev/null; then
+        # Check if JSON is valid
+        JQ_ERROR=$(echo "$REPORT" | jq empty 2>&1)
+        JQ_EXIT=$?
+        log "  jq validation exit code: $JQ_EXIT"
+        if [ $JQ_EXIT -eq 0 ]; then
             log_step "Parsing report JSON with jq..."
-            PARSED=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>/dev/null)
-            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && POD_COUNT=$PARSED
 
-            PARSED=$(echo "$REPORT" | jq -r '.error_count // 0' 2>/dev/null)
-            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && ERROR_COUNT=$PARSED
+            # Extract values - use jq with error output to debug
+            POD_COUNT=$(echo "$REPORT" | jq -r '.pod_count // 0' 2>&1)
+            log "  .pod_count = '$POD_COUNT'"
 
-            PARSED=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>/dev/null)
-            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && FIX_COUNT=$PARSED
+            ERROR_COUNT=$(echo "$REPORT" | jq -r '.error_count // 0' 2>&1)
+            log "  .error_count = '$ERROR_COUNT'"
 
-            PARSED=$(echo "$REPORT" | jq -r '.status // "ok"' 2>/dev/null)
-            [ -n "$PARSED" ] && [ "$PARSED" != "null" ] && STATUS=$PARSED
+            FIX_COUNT=$(echo "$REPORT" | jq -r '.fix_count // 0' 2>&1)
+            log "  .fix_count = '$FIX_COUNT'"
+
+            STATUS=$(echo "$REPORT" | jq -r '.status // "ok"' 2>&1)
+            log "  .status = '$STATUS'"
+
+            # Validate numeric values (in case jq returned error text)
+            [[ "$POD_COUNT" =~ ^[0-9]+$ ]] || POD_COUNT=0
+            [[ "$ERROR_COUNT" =~ ^[0-9]+$ ]] || ERROR_COUNT=0
+            [[ "$FIX_COUNT" =~ ^[0-9]+$ ]] || FIX_COUNT=0
+
             log_success "Report parsed successfully"
         else
-            log_warn "Report JSON is invalid, skipping parse"
+            log_warn "Report JSON is invalid (exit $JQ_EXIT): $JQ_ERROR"
+            log "  First 200 chars: $(echo "$REPORT" | head -c 200)"
+            # Try to show what's at the beginning that might be causing issues
+            log "  Hex dump of first 50 bytes:"
+            echo "$REPORT" | head -c 50 | xxd 2>/dev/null | head -5 | while read -r line; do
+                log "    $line"
+            done
         fi
     else
         # Fallback to grep/sed parsing (less robust)
@@ -649,7 +679,7 @@ WHERE id = $(validate_numeric $RUN_ID);"
 log_success "Run record updated"
 
 # Cleanup
-rm -f "$OUTPUT_FILE" "$STREAM_FILE" "$TEXT_FILE"
+rm -f "$OUTPUT_FILE" "$STREAM_FILE" "$TEXT_FILE" /tmp/debug_raw_report_$RUN_ID.txt /tmp/debug_clean_report_$RUN_ID.txt
 
 # === FINAL SUMMARY ===
 log_section "Run #$RUN_ID Complete"
