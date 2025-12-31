@@ -975,6 +975,9 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get optional namespace to target (overrides CronJob's TARGET_NAMESPACES)
+	targetNamespace := r.URL.Query().Get("namespace")
+
 	// Get cronjob name from environment or use default
 	cronjobName := os.Getenv("CRONJOB_NAME")
 	if cronjobName == "" {
@@ -1032,15 +1035,20 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	// Create Job from CronJob spec
 	jobSpec := cronJob.Spec.JobTemplate.Spec.DeepCopy()
 
-	// Override MODE environment variable in the container
+	// Override environment variables in the container
 	for i := range jobSpec.Template.Spec.Containers {
 		container := &jobSpec.Template.Spec.Containers[i]
 		modeFound := false
+		namespaceFound := false
 		for j := range container.Env {
 			if container.Env[j].Name == "MODE" {
 				container.Env[j].Value = mode
 				modeFound = true
-				break
+			}
+			// Override TARGET_NAMESPACES if a specific namespace was requested
+			if container.Env[j].Name == "TARGET_NAMESPACES" && targetNamespace != "" {
+				container.Env[j].Value = targetNamespace
+				namespaceFound = true
 			}
 		}
 		// If MODE env var doesn't exist, add it
@@ -1050,17 +1058,29 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 				Value: mode,
 			})
 		}
+		// If TARGET_NAMESPACES doesn't exist but namespace was requested, add it
+		if !namespaceFound && targetNamespace != "" {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  "TARGET_NAMESPACES",
+				Value: targetNamespace,
+			})
+		}
+	}
+
+	jobLabels := map[string]string{
+		"app":        "clopus-watcher",
+		"created-by": "dashboard",
+		"mode":       mode,
+	}
+	if targetNamespace != "" {
+		jobLabels["target-namespace"] = targetNamespace
 	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: cronjobNamespace,
-			Labels: map[string]string{
-				"app":        "clopus-watcher",
-				"created-by": "dashboard",
-				"mode":       mode,
-			},
+			Labels:    jobLabels,
 			Annotations: map[string]string{
 				"cronjob.kubernetes.io/instantiate": "manual",
 			},
@@ -1081,13 +1101,22 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Triggered manual run: %s", createdJob.Name)
+	if targetNamespace != "" {
+		log.Printf("Triggered manual run: %s (namespace: %s)", createdJob.Name, targetNamespace)
+	} else {
+		log.Printf("Triggered manual run: %s", createdJob.Name)
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"success": true,
 		"job":     createdJob.Name,
 		"mode":    mode,
 		"message": fmt.Sprintf("Run triggered successfully. Job: %s", createdJob.Name),
-	})
+	}
+	if targetNamespace != "" {
+		response["namespace"] = targetNamespace
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
